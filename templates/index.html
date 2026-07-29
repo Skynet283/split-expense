@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-7">
+
+    <h2 class="mb-4 fw-bold"><i class="bi bi-people-fill me-2 text-primary"></i>Your Groups</h2>
+
+    <!-- ── Create Group ── -->
+    <div class="card mb-4">
+      <div class="card-header bg-primary text-white">
+        <i class="bi bi-plus-circle me-1"></i> Create New Group
+      </div>
+      <div class="card-body">
+        <form method="POST" action="{{ url_for('main.create_group') }}">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Group Name</label>
+            <input type="text" name="name" class="form-control" placeholder="e.g. Trip to Goa" required />
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Members
+              <small class="text-muted fw-normal">(comma-separated)</small>
+            </label>
+            <input type="text" name="members" class="form-control"
+                   placeholder="e.g. Alice, Bob, Charlie" required />
+          </div>
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-plus-lg me-1"></i>Create Group
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- ── Groups List ── -->
+    {% if groups %}
+    <div class="list-group shadow-sm">
+      {% for group in groups %}
+      <div class="list-group-item list-group-item-action d-flex justify-content-between align-items-center px-4 py-3">
+        <a href="{{ url_for('main.view_group', group_id=group.id) }}" class="text-decoration-none text-dark flex-grow-1">
+          <i class="bi bi-people me-2 text-primary"></i>
+          <strong>{{ group.name }}</strong>
+          <small class="text-muted ms-2">{{ group.members | length }} members &bull; {{ group.expenses | length }} expenses</small>
+        </a>
+        <form method="POST" action="{{ url_for('main.delete_group', group_id=group.id) }}"
+              onsubmit="return confirm('Delete group \'{{ group.name }}\' and all its expenses?')">
+          <button class="btn btn-sm btn-outline-danger ms-2">
+            <i class="bi bi-trash"></i>
+          </button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-center text-muted mt-4">No groups yet. Create one above!</p>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}

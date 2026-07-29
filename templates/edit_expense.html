@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block content %}
+<a href="{{ url_for('main.view_group', group_id=group.id) }}" class="btn btn-outline-secondary btn-sm mb-3">
+  <i class="bi bi-arrow-left"></i> Back to {{ group.name }}
+</a>
+
+<div class="row justify-content-center">
+  <div class="col-lg-6">
+    <div class="card">
+      <div class="card-header bg-warning text-dark">
+        <i class="bi bi-pencil-square me-1"></i> Edit Expense — {{ group.name }}
+      </div>
+      <div class="card-body">
+        <form method="POST" id="editForm">
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Description <small class="text-muted fw-normal">(optional)</small></label>
+            <input type="text" name="description" class="form-control"
+                   value="{{ expense.description }}" placeholder="e.g. Dinner, Hotel…" />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Paid By</label>
+            <select name="paid_by" class="form-select" required>
+              {% for member in group.members %}
+              <option value="{{ member.id }}" {% if member.id == expense.paid_by_id %}selected{% endif %}>
+                {{ member.name }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Split Type</label>
+            <div class="btn-group w-100" role="group">
+              <input type="radio" class="btn-check" name="expense_type" id="type_equal" value="equal"
+                     {% if expense.expense_type == "equal" %}checked{% endif %} />
+              <label class="btn btn-outline-primary" for="type_equal">
+                <i class="bi bi-distribute-vertical me-1"></i>Equal Split
+              </label>
+              <input type="radio" class="btn-check" name="expense_type" id="type_custom" value="custom"
+                     {% if expense.expense_type == "custom" %}checked{% endif %} />
+              <label class="btn btn-outline-secondary" for="type_custom">
+                <i class="bi bi-sliders me-1"></i>Custom Split
+              </label>
+            </div>
+          </div>
+
+          <!-- Equal Split -->
+          <div id="equal_section" {% if expense.expense_type == "custom" %}style="display:none"{% endif %}>
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Total Amount (₹)</label>
+              <input type="number" name="amount" class="form-control" step="0.01" min="0.01"
+                     value="{{ "%.2f"|format(expense.amount) }}" id="equalAmount" />
+            </div>
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Shared By</label>
+              {% for member in group.members %}
+              <div class="form-check">
+                <input class="form-check-input shared-check" type="checkbox"
+                       name="shared_by" value="{{ member.id }}"
+                       id="eq_{{ member.id }}"
+                       {% if member.id in shared_ids %}checked{% endif %} />
+                <label class="form-check-label" for="eq_{{ member.id }}">{{ member.name }}</label>
+              </div>
+              {% endfor %}
+            </div>
+            <p class="text-muted small" id="perPersonHint"></p>
+          </div>
+
+          <!-- Custom Split -->
+          <div id="custom_section" {% if expense.expense_type != "custom" %}style="display:none"{% endif %}>
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Total Amount (₹)</label>
+              <input type="number" name="custom_total" class="form-control" step="0.01" min="0.01"
+                     value="{{ '%.2f'|format(expense.amount) if expense.expense_type == 'custom' else '' }}" placeholder="0.00" />
+            </div>
+            <label class="form-label fw-semibold">Amount Each Person Owes (₹)</label>
+            {% for member in group.members %}
+            <div class="input-group mb-2">
+              <span class="input-group-text" style="min-width:90px">{{ member.name }}</span>
+              <input type="number" name="custom_{{ member.id }}" class="form-control custom-amt"
+                     step="0.01" min="0"
+                     value="{{ "%.2f"|format(current_splits.get(member.id, 0)) if current_splits.get(member.id) else '' }}"
+                     placeholder="0.00" />
+            </div>
+            {% endfor %}
+            <p class="text-muted small">Split total: ₹<span id="customTotal">0.00</span> (must match the total amount)</p>
+          </div>
+
+          <button type="submit" class="btn btn-warning w-100 mt-2">
+            <i class="bi bi-save me-1"></i>Save Changes
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Toggle equal / custom sections
+  document.querySelectorAll('input[name="expense_type"]').forEach(radio => {
+    radio.addEventListener('change', function () {
+      const isEqual = this.value === 'equal';
+      document.getElementById('equal_section').style.display  = isEqual ? '' : 'none';
+      document.getElementById('custom_section').style.display = isEqual ? 'none' : '';
+      if (!isEqual) updateCustomTotal();
+      else           updateHint();
+    });
+  });
+
+  // Equal: per-person hint
+  function updateHint() {
+    const amt     = parseFloat(document.getElementById('equalAmount').value) || 0;
+    const checked = document.querySelectorAll('.shared-check:checked').length;
+    const hint    = document.getElementById('perPersonHint');
+    hint.textContent = (amt > 0 && checked > 0)
+      ? `₹${(amt / checked).toFixed(2)} per person (${checked} people)`
+      : '';
+  }
+  document.getElementById('equalAmount').addEventListener('input', updateHint);
+  document.querySelectorAll('.shared-check').forEach(cb => cb.addEventListener('change', updateHint));
+  updateHint();
+
+  // Custom: running total
+  function updateCustomTotal() {
+    let total = 0;
+    document.querySelectorAll('.custom-amt').forEach(inp => {
+      total += parseFloat(inp.value) || 0;
+    });
+    document.getElementById('customTotal').textContent = total.toFixed(2);
+  }
+  document.querySelectorAll('.custom-amt').forEach(inp => inp.addEventListener('input', updateCustomTotal));
+  updateCustomTotal();
+</script>
+{% endblock %}
