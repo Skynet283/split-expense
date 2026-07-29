@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-sm-8 col-md-5 col-lg-4">
+    <div class="card">
+      <div class="card-header bg-primary text-white">
+        <i class="bi bi-shield-lock me-1"></i> Sign in
+      </div>
+      <div class="card-body p-4">
+        <form method="POST" action="{{ url_for('main.login', next=request.args.get('next')) }}">
+          <div class="mb-3">
+            <label for="login_id" class="form-label fw-semibold">User ID</label>
+            <input id="login_id" name="login_id" class="form-control" inputmode="numeric" autocomplete="username" required autofocus />
+          </div>
+          <div class="mb-3">
+            <label for="password" class="form-label fw-semibold">Password</label>
+            <input id="password" name="password" type="password" class="form-control" autocomplete="current-password" required />
+          </div>
+          <button class="btn btn-primary w-100"><i class="bi bi-box-arrow-in-right me-1"></i>Sign in</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

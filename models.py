@@ -1,11 +1,24 @@
 from decimal import Decimal
 
+from flask_login import UserMixin
+
 from extensions import db
+
+
+class User(UserMixin, db.Model):
+    __tablename__ = "users"
+
+    id = db.Column(db.Integer, primary_key=True)
+    login_id = db.Column(db.String(30), unique=True, nullable=False, index=True)
+    password_hash = db.Column(db.String(255), nullable=False)
+    groups = db.relationship("Group", back_populates="owner", lazy=True)
 
 
 class Group(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
+    owner_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True, index=True)
+    owner = db.relationship("User", back_populates="groups")
     members = db.relationship("Member", backref="group", lazy=True, cascade="all, delete-orphan")
     expenses = db.relationship("Expense", backref="group", lazy=True, cascade="all, delete-orphan")
 

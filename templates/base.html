@@ -20,6 +20,14 @@
 <nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-4 shadow-sm">
   <div class="container">
     <a class="navbar-brand" href="{{ url_for('main.index') }}"><i class="bi bi-cash-coin me-2"></i>Expense Splitter</a>
+    {% if current_user.is_authenticated %}
+    <div class="d-flex align-items-center gap-2 text-white">
+      <span class="small"><i class="bi bi-person-circle me-1"></i>{{ current_user.login_id }}</span>
+      <form method="POST" action="{{ url_for('main.logout') }}" class="m-0">
+        <button class="btn btn-sm btn-outline-light">Log out</button>
+      </form>
+    </div>
+    {% endif %}
   </div>
 </nav>
 

@@ -2,12 +2,14 @@ import logging
 from io import BytesIO
 
 import openpyxl
-from flask import Blueprint, current_app, flash, redirect, render_template, request, send_file, url_for
+from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, send_file, url_for
+from flask_login import current_user, login_required, login_user, logout_user
 from sqlalchemy.exc import SQLAlchemyError
+from werkzeug.security import check_password_hash
 
-from extensions import db
+from extensions import db, login_manager
 from helpers import ZERO, compute_balances, compute_settlements, save_splits
-from models import Expense, ExpenseSplit, Group, Member
+from models import Expense, ExpenseSplit, Group, Member, User
 
 main = Blueprint("main", __name__)
 logger = logging.getLogger(__name__)
@@ -20,12 +22,58 @@ def group_member_or_error(group, member_id):
     return member
 
 
+def current_users_group(group_id):
+    group = db.get_or_404(Group, group_id)
+    if group.owner_id != current_user.id:
+        abort(403)
+    return group
+
+
+def safe_next_url(value):
+    return value if value and value.startswith("/") and not value.startswith("//") else url_for("main.index")
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    try:
+        return db.session.get(User, int(user_id))
+    except (TypeError, ValueError):
+        return None
+
+
+@main.route("/login", methods=["GET", "POST"])
+def login():
+    if current_user.is_authenticated:
+        return redirect(url_for("main.index"))
+    if request.method == "POST":
+        login_id = request.form.get("login_id", "").strip()
+        password = request.form.get("password", "")
+        user = User.query.filter_by(login_id=login_id).first()
+        if user and check_password_hash(user.password_hash, password):
+            login_user(user)
+            flash("You are signed in.", "success")
+            return redirect(safe_next_url(request.args.get("next")))
+        flash("Invalid ID or password.", "danger")
+    return render_template("login.html")
+
+
+@main.post("/logout")
+@login_required
+def logout():
+    logout_user()
+    flash("You have been signed out.", "info")
+    return redirect(url_for("main.login"))
+
+
 @main.route("/")
+@login_required
 def index():
-    return render_template("index.html", groups=Group.query.order_by(Group.id.desc()).all())
+    groups = Group.query.filter_by(owner_id=current_user.id).order_by(Group.id.desc()).all()
+    return render_template("index.html", groups=groups)
 
 
 @main.route("/groups", methods=["POST"])
+@login_required
 def create_group():
     name = request.form.get("name", "").strip()
     member_names = list(dict.fromkeys(member.strip() for member in request.form.get("members", "").split(",") if member.strip()))
@@ -36,7 +84,7 @@ def create_group():
         flash("Group and member names must be at most 100 characters.", "danger")
         return redirect(url_for("main.index"))
 
-    group = Group(name=name)
+    group = Group(name=name, owner_id=current_user.id)
     db.session.add(group)
     db.session.flush()
     db.session.add_all(Member(name=member_name, group_id=group.id) for member_name in member_names)
@@ -46,8 +94,9 @@ def create_group():
 
 
 @main.route("/groups/<int:group_id>")
+@login_required
 def view_group(group_id):
-    group = db.get_or_404(Group, group_id)
+    group = current_users_group(group_id)
     balances = compute_balances(group)
     return render_template("group.html", group=group, balances=balances,
                            settlements=compute_settlements(balances),
@@ -55,8 +104,9 @@ def view_group(group_id):
 
 
 @main.route("/groups/<int:group_id>/expenses/new", methods=["GET", "POST"])
+@login_required
 def add_expense(group_id):
-    group = db.get_or_404(Group, group_id)
+    group = current_users_group(group_id)
     if request.method == "POST":
         try:
             paid_by_id = int(request.form.get("paid_by", ""))
@@ -80,8 +130,9 @@ def add_expense(group_id):
 
 
 @main.route("/groups/<int:group_id>/expenses/<int:expense_id>/edit", methods=["GET", "POST"])
+@login_required
 def edit_expense(group_id, expense_id):
-    group = db.get_or_404(Group, group_id)
+    group = current_users_group(group_id)
     expense = db.get_or_404(Expense, expense_id)
     if expense.group_id != group.id:
         return redirect(url_for("main.view_group", group_id=group.id))
@@ -111,10 +162,12 @@ def edit_expense(group_id, expense_id):
 
 
 @main.post("/groups/<int:group_id>/expenses/<int:expense_id>/delete")
+@login_required
 def delete_expense(group_id, expense_id):
+    group = current_users_group(group_id)
     expense = db.get_or_404(Expense, expense_id)
-    if expense.group_id != group_id:
-        return redirect(url_for("main.view_group", group_id=group_id))
+    if expense.group_id != group.id:
+        abort(404)
     db.session.delete(expense)
     db.session.commit()
     flash("Expense deleted.", "info")
@@ -122,8 +175,9 @@ def delete_expense(group_id, expense_id):
 
 
 @main.post("/groups/<int:group_id>/delete")
+@login_required
 def delete_group(group_id):
-    group = db.get_or_404(Group, group_id)
+    group = current_users_group(group_id)
     name = group.name
     db.session.delete(group)
     db.session.commit()
@@ -132,8 +186,9 @@ def delete_group(group_id):
 
 
 @main.route("/groups/<int:group_id>/export")
+@login_required
 def export_excel(group_id):
-    group = db.get_or_404(Group, group_id)
+    group = current_users_group(group_id)
     balances = compute_balances(group)
     settlements = compute_settlements(balances)
     member_map = {member.id: member.name for member in group.members}
