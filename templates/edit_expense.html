@@ -11,20 +11,22 @@
         <i class="bi bi-pencil-square me-1"></i> Edit Expense — {{ group.name }}
       </div>
       <div class="card-body">
+        <div class="alert alert-info small">Saving creates a new revision. The current version remains in the expense history.</div>
         <form method="POST" id="editForm">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
 
           <div class="mb-3">
-            <label class="form-label fw-semibold">Description <small class="text-muted fw-normal">(optional)</small></label>
-            <input type="text" name="description" class="form-control"
+            <label for="description" class="form-label fw-semibold">Description <small class="text-muted fw-normal">(optional)</small></label>
+            <input id="description" type="text" name="description" class="form-control"
                    value="{{ expense.description }}" placeholder="e.g. Dinner, Hotel…" />
           </div>
 
           <div class="mb-3">
-            <label class="form-label fw-semibold">Paid By</label>
-            <select name="paid_by" class="form-select" required>
-              {% for member in group.members %}
-              <option value="{{ member.id }}" {% if member.id == expense.paid_by_id %}selected{% endif %}>
-                {{ member.name }}
+            <label for="paidBy" class="form-label fw-semibold">Paid By</label>
+            <select id="paidBy" name="paid_by" class="form-select" required>
+              {% for participant in participants %}
+              <option value="{{ participant.id }}" {% if participant.id == selected_payer_id %}selected{% endif %}>
+                {{ participant_labels[participant.id] }}
               </option>
               {% endfor %}
             </select>
@@ -55,13 +57,13 @@
             </div>
             <div class="mb-3">
               <label class="form-label fw-semibold">Shared By</label>
-              {% for member in group.members %}
+              {% for participant in participants %}
               <div class="form-check">
                 <input class="form-check-input shared-check" type="checkbox"
-                       name="shared_by" value="{{ member.id }}"
-                       id="eq_{{ member.id }}"
-                       {% if member.id in shared_ids %}checked{% endif %} />
-                <label class="form-check-label" for="eq_{{ member.id }}">{{ member.name }}</label>
+                       name="shared_by" value="{{ participant.id }}"
+                       id="eq_{{ participant.id }}"
+                       {% if participant.id in shared_ids %}checked{% endif %} />
+                <label class="form-check-label" for="eq_{{ participant.id }}">{{ participant_labels[participant.id] }}</label>
               </div>
               {% endfor %}
             </div>
@@ -76,12 +78,12 @@
                      value="{{ '%.2f'|format(expense.amount) if expense.expense_type == 'custom' else '' }}" placeholder="0.00" />
             </div>
             <label class="form-label fw-semibold">Amount Each Person Owes (₹)</label>
-            {% for member in group.members %}
+            {% for participant in participants %}
             <div class="input-group mb-2">
-              <span class="input-group-text" style="min-width:90px">{{ member.name }}</span>
-              <input type="number" name="custom_{{ member.id }}" class="form-control custom-amt"
+              <span class="input-group-text" style="min-width:90px">{{ participant_labels[participant.id] }}</span>
+              <input type="number" name="custom_{{ participant.id }}" class="form-control custom-amt"
                      step="0.01" min="0"
-                     value="{{ "%.2f"|format(current_splits.get(member.id, 0)) if current_splits.get(member.id) else '' }}"
+                     value="{{ "%.2f"|format(current_splits.get(participant.id, 0)) if current_splits.get(participant.id) else '' }}"
                      placeholder="0.00" />
             </div>
             {% endfor %}
@@ -89,7 +91,7 @@
           </div>
 
           <button type="submit" class="btn btn-warning w-100 mt-2">
-            <i class="bi bi-save me-1"></i>Save Changes
+            <i class="bi bi-save me-1"></i>Save New Revision
           </button>
         </form>
       </div>

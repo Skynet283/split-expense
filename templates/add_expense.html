@@ -12,17 +12,18 @@
       </div>
       <div class="card-body">
         <form method="POST" id="expenseForm">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
 
           <div class="mb-3">
-            <label class="form-label fw-semibold">Description <small class="text-muted fw-normal">(optional)</small></label>
-            <input type="text" name="description" class="form-control" placeholder="e.g. Dinner, Hotel…" />
+            <label for="description" class="form-label fw-semibold">Description <small class="text-muted fw-normal">(optional)</small></label>
+            <input id="description" type="text" name="description" class="form-control" placeholder="e.g. Dinner, Hotel…" />
           </div>
 
           <div class="mb-3">
-            <label class="form-label fw-semibold">Paid By</label>
-            <select name="paid_by" class="form-select" required>
-              {% for member in group.members %}
-              <option value="{{ member.id }}">{{ member.name }}</option>
+            <label for="paidBy" class="form-label fw-semibold">Paid By</label>
+            <select id="paidBy" name="paid_by" class="form-select" required>
+              {% for participant in participants %}
+              <option value="{{ participant.id }}">{{ participant_labels[participant.id] }}</option>
               {% endfor %}
             </select>
           </div>
@@ -44,18 +45,18 @@
           <!-- Equal Split -->
           <div id="equal_section">
             <div class="mb-3">
-              <label class="form-label fw-semibold">Total Amount (₹)</label>
+              <label for="equalAmount" class="form-label fw-semibold">Total Amount (₹)</label>
               <input type="number" name="amount" class="form-control" step="0.01" min="0.01"
                      placeholder="0.00" id="equalAmount" />
             </div>
             <div class="mb-3">
               <label class="form-label fw-semibold">Shared By</label>
-              {% for member in group.members %}
+              {% for participant in participants %}
               <div class="form-check">
                 <input class="form-check-input shared-check" type="checkbox"
-                       name="shared_by" value="{{ member.id }}"
-                       id="eq_{{ member.id }}" checked />
-                <label class="form-check-label" for="eq_{{ member.id }}">{{ member.name }}</label>
+                       name="shared_by" value="{{ participant.id }}"
+                       id="eq_{{ participant.id }}" checked />
+                <label class="form-check-label" for="eq_{{ participant.id }}">{{ participant_labels[participant.id] }}</label>
               </div>
               {% endfor %}
             </div>
@@ -65,14 +66,14 @@
           <!-- Custom Split -->
           <div id="custom_section" style="display:none">
             <div class="mb-3">
-              <label class="form-label fw-semibold">Total Amount (₹)</label>
-              <input type="number" name="custom_total" class="form-control" step="0.01" min="0.01" placeholder="0.00" />
+              <label for="customAmount" class="form-label fw-semibold">Total Amount (₹)</label>
+              <input id="customAmount" type="number" name="custom_total" class="form-control" step="0.01" min="0.01" placeholder="0.00" />
             </div>
             <label class="form-label fw-semibold">Amount Each Person Owes (₹)</label>
-            {% for member in group.members %}
+            {% for participant in participants %}
             <div class="input-group mb-2">
-              <span class="input-group-text" style="min-width:90px">{{ member.name }}</span>
-              <input type="number" name="custom_{{ member.id }}" class="form-control custom-amt"
+              <span class="input-group-text" style="min-width:90px">{{ participant_labels[participant.id] }}</span>
+              <input type="number" name="custom_{{ participant.id }}" class="form-control custom-amt"
                      step="0.01" min="0" placeholder="0.00" />
             </div>
             {% endfor %}

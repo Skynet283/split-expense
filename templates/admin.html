@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="mb-4 fw-bold"><i class="bi bi-shield-lock me-2 text-primary"></i>Administration</h2>
+
+<div class="row g-4 mb-4">
+  <div class="col-md-6">
+    <div class="card h-100"><div class="card-header bg-primary text-white">Global balances</div>
+      <ul class="list-group list-group-flush">
+        {% for user in users %}
+        {% set balance = balances.get(user.id, zero) %}
+        <li class="list-group-item d-flex justify-content-between gap-2"><span>{{ user.name or user.login_id }} <small class="text-muted">{{ user.login_id }}</small></span><span>{% if balance > zero %}Should receive ₹{{ "%.2f"|format(balance) }}{% elif balance < zero %}Should pay ₹{{ "%.2f"|format(-balance) }}{% else %}Settled{% endif %}</span></li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card h-100"><div class="card-header bg-secondary text-white">Financial health</div>
+      <div class="card-body">{% if unresolved_count %}<strong>{{ unresolved_count }}</strong> active expense{{ "s" if unresolved_count != 1 else "" }} {{ "needs" if unresolved_count == 1 else "need" }} attention because a participant is not linked to a user.{% else %}<i class="bi bi-check-circle-fill text-success me-1"></i>All active expenses are fully linked to users.{% endif %}</div>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-4"><div class="card-header bg-dark text-white">Users</div>
+  <div class="table-responsive"><table class="table table-hover mb-0"><thead><tr><th>Name</th><th>Login ID</th><th>Admin</th></tr></thead>
+    <tbody>{% for user in users %}<tr><td>{{ user.name or "—" }}</td><td>{{ user.login_id }}</td><td>{{ "Yes" if user.is_admin else "No" }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+
+<div class="card"><div class="card-header bg-dark text-white">Groups</div>
+  <div class="table-responsive"><table class="table table-hover mb-0"><thead><tr><th>Name</th><th>Owner</th><th>Status</th><th>Members</th><th>Expense records</th></tr></thead>
+    <tbody>{% for group in groups %}<tr><td>{{ group.name }}</td><td>{{ group.owner.name or group.owner.login_id if group.owner else "—" }}</td><td><span class="badge {% if group.is_archived %}bg-secondary{% else %}bg-success{% endif %}">{{ "Archived" if group.is_archived else "Active" }}</span></td><td>{{ group.memberships | length }}</td><td>{{ group.expense_records | length }}</td></tr>{% else %}<tr><td colspan="5" class="text-muted">No groups have been created yet.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+{% endblock %}

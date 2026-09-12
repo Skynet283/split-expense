@@ -3,7 +3,8 @@
 <div class="row justify-content-center">
   <div class="col-lg-7">
 
-    <h2 class="mb-4 fw-bold"><i class="bi bi-people-fill me-2 text-primary"></i>Your Groups</h2>
+    <h2 class="mb-1 fw-bold"><i class="bi bi-people-fill me-2 text-primary"></i>Your Groups <span class="fs-5 text-muted">Active</span></h2>
+    <p class="text-muted mb-4">Create and manage groups you currently participate in.</p>
 
     <!-- ── Create Group ── -->
     <div class="card mb-4">
@@ -12,16 +13,20 @@
       </div>
       <div class="card-body">
         <form method="POST" action="{{ url_for('main.create_group') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
           <div class="mb-3">
-            <label class="form-label fw-semibold">Group Name</label>
-            <input type="text" name="name" class="form-control" placeholder="e.g. Trip to Goa" required />
+            <label for="groupName" class="form-label fw-semibold">Group Name</label>
+            <input id="groupName" type="text" name="name" class="form-control" placeholder="e.g. Trip to Goa" required />
           </div>
           <div class="mb-3">
-            <label class="form-label fw-semibold">Members
-              <small class="text-muted fw-normal">(comma-separated)</small>
-            </label>
-            <input type="text" name="members" class="form-control"
-                   placeholder="e.g. Alice, Bob, Charlie" required />
+            <label for="userSearch" class="form-label fw-semibold">Add registered users</label>
+            <div class="input-group">
+              <input id="userSearch" class="form-control" inputmode="numeric" maxlength="10" placeholder="Enter a 10-digit User ID" />
+              <button type="button" id="findUser" class="btn btn-outline-primary">Find</button>
+            </div>
+            <div id="searchResult" class="small mt-2"></div>
+            <div id="selectedUsers" class="mt-2"></div>
+            <small class="text-muted">You are automatically added to every group you create.</small>
           </div>
           <button type="submit" class="btn btn-primary">
             <i class="bi bi-plus-lg me-1"></i>Create Group
@@ -38,21 +43,145 @@
         <a href="{{ url_for('main.view_group', group_id=group.id) }}" class="text-decoration-none text-dark flex-grow-1">
           <i class="bi bi-people me-2 text-primary"></i>
           <strong>{{ group.name }}</strong>
-          <small class="text-muted ms-2">{{ group.members | length }} members &bull; {{ group.expenses | length }} expenses</small>
+          <small class="text-muted ms-2">{{ group.members | length }} members &bull; {{ active_counts[group.id] }} active expenses{% if group.owner_id != current_user.id %} &bull; Owner: {{ group.owner.name or group.owner.login_id }}{% endif %}</small>
         </a>
-        <form method="POST" action="{{ url_for('main.delete_group', group_id=group.id) }}"
-              onsubmit="return confirm('Delete group \'{{ group.name }}\' and all its expenses?')">
-          <button class="btn btn-sm btn-outline-danger ms-2">
-            <i class="bi bi-trash"></i>
+        {% if group.owner_id == current_user.id %}<form method="POST" action="{{ url_for('main.delete_group', group_id=group.id) }}"
+              onsubmit="return confirm('Archive this group? Its history will be preserved.')">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <button class="btn btn-sm btn-outline-danger ms-2" aria-label="Archive {{ group.name }}">
+            <i class="bi bi-archive me-1"></i>Archive
           </button>
         </form>
+        {% endif %}
       </div>
       {% endfor %}
     </div>
     {% else %}
-    <p class="text-center text-muted mt-4">No groups yet. Create one above!</p>
+    <div class="text-center text-muted border rounded p-4 mt-4">No active groups yet. Create your first group above to start sharing expenses.</div>
     {% endif %}
+
+    <section id="global-settle-up" class="card mt-4">
+      <div class="card-header bg-success text-white"><i class="bi bi-globe2 me-1"></i>Global Settle Up</div>
+      <div class="card-body">
+        <p class="text-muted small">Direct obligations across all groups, including archived groups.</p>
+        <div class="row g-3">
+          <div class="col-md-6">
+            <h3 class="h6 text-danger">You owe</h3>
+            {% if outgoing_obligations %}
+              {% for obligation in outgoing_obligations %}
+              <div class="border rounded p-3 mb-2">
+                <div class="d-flex justify-content-between gap-2"><strong>{{ obligation.user.name or obligation.user.login_id }}</strong><strong>₹{{ "%.2f"|format(obligation.amount) }}</strong></div>
+                {% if obligation.pending_amount %}<small class="text-muted d-block mb-2">Pending outgoing: ₹{{ "%.2f"|format(obligation.pending_amount) }}</small>{% endif %}
+                <small class="text-muted d-block">Total outstanding shown above.</small>
+                {% if obligation.pending_amount %}<small class="text-muted d-block">Awaiting confirmation from {{ obligation.user.name or obligation.user.login_id }}.</small>{% endif %}
+                {% if obligation.available_amount > zero %}
+                <small class="text-muted d-block mb-2">₹{{ "%.2f"|format(obligation.available_amount) }} still available to settle.</small>
+                <form method="POST" action="{{ url_for('main.create_settlement_request') }}" class="settlement-request-form d-flex gap-2 align-items-end">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                  <input type="hidden" name="recipient_user_id" value="{{ obligation.user.id }}" />
+                  <div class="flex-grow-1"><label for="settle_{{ obligation.user.id }}" class="form-label small mb-1">Amount</label><input id="settle_{{ obligation.user.id }}" name="amount" type="number" class="form-control form-control-sm" min="0.01" max="{{ "%.2f"|format(obligation.available_amount) }}" value="{{ "%.2f"|format(obligation.available_amount) }}" step="0.01" required /></div>
+                  <button class="btn btn-sm btn-success">Settle</button>
+                </form>
+                {% else %}
+                <small class="text-muted d-block mb-2">Settlement pending. No further action is required until {{ obligation.user.name or obligation.user.login_id }} confirms or rejects it.</small>
+                {% endif %}
+              </div>
+              {% endfor %}
+            {% else %}
+              <p class="text-muted mb-0">You have no direct global payments to make.</p>
+            {% endif %}
+          </div>
+          <div class="col-md-6">
+            <h3 class="h6 text-success">Owed to you</h3>
+            {% if incoming_obligations %}
+              {% for obligation in incoming_obligations %}
+              <div class="border rounded p-3 mb-2">
+                <div class="d-flex justify-content-between gap-2"><strong>{{ obligation.user.name or obligation.user.login_id }}</strong><strong>₹{{ "%.2f"|format(obligation.amount) }}</strong></div>
+                {% if obligation.pending_amount %}<small class="text-muted">Pending incoming: ₹{{ "%.2f"|format(obligation.pending_amount) }}</small>{% else %}<small class="text-muted">No pending incoming settlement.</small>{% endif %}
+              </div>
+              {% endfor %}
+            {% else %}
+              <p class="text-muted mb-0">No one currently owes you through a direct global obligation.</p>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="card mt-4">
+      <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-arrow-left-right me-1"></i>Settlement Requests</span>
+        <span class="badge bg-light text-dark">{{ settlement_requests | length }}</span>
+      </div>
+      {% if settlement_requests %}
+      <div class="list-group list-group-flush">
+        {% for settlement in settlement_requests %}
+        <div class="list-group-item">
+          <div class="d-flex flex-wrap justify-content-between gap-2 align-items-center">
+            <span><strong>{{ settlement.requester.name or settlement.requester.login_id }}</strong> paid <strong>{{ settlement.recipient.name or settlement.recipient.login_id }}</strong> <strong>₹{{ "%.2f"|format(settlement.amount) }}</strong></span>
+            <span class="badge {% if settlement.status == 'PENDING' %}bg-warning text-dark{% elif settlement.status == 'CONFIRMED' %}bg-success{% else %}bg-secondary{% endif %}">{{ settlement.status.title() }}</span>
+          </div>
+          {% if settlement.status == 'PENDING' and settlement.recipient_user_id == current_user.id %}
+          <div class="mt-2 d-flex gap-2">
+            <form method="POST" action="{{ url_for('main.confirm_settlement_request', request_id=settlement.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}" /><button class="btn btn-sm btn-success">Confirm payment</button></form>
+            <form method="POST" action="{{ url_for('main.reject_settlement_request', request_id=settlement.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}" /><button class="btn btn-sm btn-outline-secondary">Reject request</button></form>
+          </div>
+          {% elif settlement.status == 'PENDING' %}
+          <small class="text-muted">Awaiting confirmation from {{ settlement.recipient.name or settlement.recipient.login_id }}.</small>
+          {% else %}
+          <small class="text-muted">This request is read-only.</small>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="card-body text-muted">No settlement requests yet. Requests will appear here when a payment is proposed.</div>
+      {% endif %}
+    </div>
 
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const selected = new Map();
+  const search = document.getElementById('userSearch');
+  const result = document.getElementById('searchResult');
+  const selectedBox = document.getElementById('selectedUsers');
+  function renderSelected() {
+    selectedBox.replaceChildren();
+    selected.forEach(user => {
+      const badge = document.createElement('span');
+      badge.className = 'badge text-bg-secondary me-1 mb-1';
+      badge.textContent = `${user.name} — ${user.login_id} `;
+      const remove = document.createElement('button');
+      remove.type = 'button'; remove.className = 'btn-close btn-close-white ms-1';
+      remove.setAttribute('aria-label', `Remove ${user.name}`);
+      remove.onclick = () => { selected.delete(user.login_id); renderSelected(); };
+      const hidden = document.createElement('input');
+      hidden.type = 'hidden'; hidden.name = 'user_ids'; hidden.value = user.login_id;
+      badge.append(remove); selectedBox.append(badge, hidden);
+    });
+  }
+  async function findUser() {
+    const loginId = search.value;
+    if (!/^\d{10}$/.test(loginId)) { result.textContent = 'Enter exactly 10 digits.'; return; }
+    const response = await fetch(`{{ url_for('main.search_user') }}?login_id=${encodeURIComponent(loginId)}`);
+    const data = await response.json();
+    if (!data.user) { result.textContent = 'No registered user found for that ID.'; return; }
+    result.replaceChildren();
+    const button = document.createElement('button');
+    button.type = 'button'; button.className = 'btn btn-sm btn-outline-success';
+    button.textContent = `Add ${data.user.name} — ${data.user.login_id}`;
+    button.onclick = () => { selected.set(data.user.login_id, data.user); renderSelected(); result.textContent = ''; search.value = ''; };
+    result.append(button);
+  }
+  document.getElementById('findUser').addEventListener('click', findUser);
+  search.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); findUser(); } });
+  document.querySelectorAll('.settlement-request-form').forEach(form => form.addEventListener('submit', () => {
+    const button = form.querySelector('button[type="submit"], button:not([type])');
+    if (button) { button.disabled = true; button.textContent = 'Submitting...'; }
+  }));
+</script>
 {% endblock %}
