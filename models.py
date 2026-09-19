@@ -22,6 +22,8 @@ class User(UserMixin, db.Model):
     # Stage 1.  Registration always supplies a name.
     name = db.Column(db.String(100), nullable=True)
     password_hash = db.Column(db.String(255), nullable=False)
+    # Access state only; historical ledger and membership rows are retained.
+    is_active = db.Column(db.Boolean, nullable=False, default=True, server_default=db.true(), index=True)
     # Explicitly assigned only through a trusted database operation. Public
     # registration never accepts or sets this field.
     is_admin = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false(), index=True)
@@ -147,6 +149,31 @@ class ExpenseRevision(db.Model):
     expense_record = db.relationship("ExpenseRecord", back_populates="revisions")
     expense = db.relationship("Expense", foreign_keys=[expense_id])
     recorded_by_user = db.relationship("User", foreign_keys=[recorded_by_user_id])
+
+
+class ActivityEvent(db.Model):
+    """Structured user-visible audit event; never an accounting source."""
+
+    __tablename__ = "activity_event"
+    __table_args__ = (
+        db.CheckConstraint(
+            "event_type IN ('expense_created', 'expense_revised')",
+            name="ck_activity_event_type",
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    actor_user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False,
+                              index=True)
+    event_type = db.Column(db.String(40), nullable=False, index=True)
+    group_id = db.Column(db.Integer, db.ForeignKey("group.id", ondelete="RESTRICT"), nullable=False, index=True)
+    expense_record_id = db.Column(db.Integer, db.ForeignKey("expense_record.id", ondelete="RESTRICT"),
+                                  nullable=False, index=True)
+    created_at = db.Column(db.DateTime, nullable=False, server_default=db.func.now(), index=True)
+    details = db.Column(db.JSON, nullable=False, default=dict)
+    actor = db.relationship("User", foreign_keys=[actor_user_id])
+    group = db.relationship("Group", foreign_keys=[group_id])
+    expense_record = db.relationship("ExpenseRecord", foreign_keys=[expense_record_id])
 
 
 class SettlementRequest(db.Model):

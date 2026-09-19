@@ -6,6 +6,7 @@ from config import Config
 from extensions import db
 from helpers import compute_balances, compute_user_balances
 from models import Expense, ExpenseRecord, ExpenseRevision, ExpenseSplit, Group, GroupMembership, Member, User
+from test_factory import create_user
 
 
 class TestConfig(Config):
@@ -26,8 +27,7 @@ class Stage2Tests(unittest.TestCase):
         self.client = self.app.test_client()
 
     def register(self, name, login_id):
-        self.client.post("/register", data={"name": name, "login_id": login_id,
-                                              "password": "secret", "confirm_password": "secret"})
+        create_user(self.app, name, login_id)
 
     def login(self, login_id):
         return self.client.post("/login", data={"login_id": login_id, "password": "secret"}, follow_redirects=True)

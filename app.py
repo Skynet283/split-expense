@@ -31,9 +31,13 @@ def initialize_database(app):
         if "is_admin" not in user_columns:
             db.session.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0"))
             db.session.commit()
+        if "is_active" not in user_columns:
+            db.session.execute(text("ALTER TABLE users ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1"))
+            db.session.commit()
         # Covers a manually created nullable legacy column as well as making
         # the migration repeatable. No existing account receives elevation.
         db.session.execute(text("UPDATE users SET is_admin = 0 WHERE is_admin IS NULL"))
+        db.session.execute(text("UPDATE users SET is_active = 1 WHERE is_active IS NULL"))
         db.session.commit()
 
         # Stage 2 deliberately adds nullable links only.  No existing Member is
@@ -149,7 +153,9 @@ def create_app(config_class=Config):
     login_manager.login_view = "main.login"  # type: ignore[reportAttributeAccessIssue]
     login_manager.login_message_category = "info"
 
-    from routes import main
+    from routes import admin_authenticated, main
+
+    app.jinja_env.globals["admin_authenticated"] = admin_authenticated
 
     app.register_blueprint(main)
 

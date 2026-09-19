@@ -22,15 +22,18 @@ class Stage9Tests(unittest.TestCase):
             user.is_admin = True
             db.session.commit()
 
-    def test_navigation_only_shows_admin_link_to_admins(self):
+    def test_navigation_only_shows_management_link_to_backend_admin(self):
         self.register("Asha", "0123456789")
         self.register("Bala", "1234567890")
         self.login("0123456789")
         self.promote("0123456789")
-        self.assertIn(b">Admin<", self.client.get("/").data)
+        self.assertNotIn(b">User Management<", self.client.get("/").data)
         self.client.post("/logout")
         self.login("1234567890")
-        self.assertNotIn(b">Admin<", self.client.get("/").data)
+        self.assertNotIn(b">User Management<", self.client.get("/").data)
+        self.client.post("/logout")
+        self.client.post("/admin/login", data={"username": "test-admin", "password": "test-admin-password"})
+        self.assertIn(b">User Management<", self.client.get("/admin").data)
 
     def test_empty_group_and_active_group_empty_states_are_clear(self):
         self.register("Asha", "0123456789")

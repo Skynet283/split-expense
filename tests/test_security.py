@@ -5,6 +5,7 @@ from app import create_app
 from config import Config
 from extensions import db
 from models import ExpenseRecord, Group, SettlementRequest, User
+from test_factory import create_user
 import test_stage6
 
 
@@ -32,9 +33,7 @@ class CsrfReleaseHardeningTests(unittest.TestCase):
         return self.client.post(path, data=payload)
 
     def register(self, name, login_id):
-        return self.post("/register", {"name": name, "login_id": login_id,
-                                        "password": "secret", "confirm_password": "secret"},
-                         token_path="/register")
+        return create_user(self.app, name, login_id)
 
     def login(self, login_id):
         return self.post("/login", {"login_id": login_id, "password": "secret"})
@@ -82,7 +81,7 @@ class CsrfReleaseHardeningTests(unittest.TestCase):
     def test_rendered_forms_include_tokens_and_valid_tokens_preserve_workflows(self):
         group_id, record_id, users = self.seed()
         self.client.post("/logout", data={"csrf_token": self.token("/")})
-        pages = [self.client.get("/login"), self.client.get("/register")]
+        pages = [self.client.get("/login")]
         self.login("1234567890")
         request = self.post("/settlement-requests", {"recipient_user_id": users["0123456789"], "amount": "10.00"}, token_path="/")
         self.assertEqual(request.status_code, 302)

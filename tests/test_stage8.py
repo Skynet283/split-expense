@@ -9,6 +9,7 @@ from extensions import db
 from helpers import compute_global_user_balances
 from models import Group, User
 import test_stage6
+from test_factory import create_user
 
 
 class Stage8Tests(unittest.TestCase):
@@ -52,16 +53,18 @@ class Stage8Tests(unittest.TestCase):
                     db.session.remove()
                     db.engine.dispose()
 
-    def test_registration_is_always_non_admin_and_cannot_inject_role(self):
-        self.client.post("/register", data={"name": "Asha", "login_id": "0123456789", "password": "secret",
-                                             "confirm_password": "secret", "is_admin": "true"})
+    def test_public_registration_cannot_inject_role_or_create_user(self):
+        response = self.client.post("/register", data={"name": "Asha", "login_id": "0123456789",
+                                                       "password": "secret", "is_admin": "true"})
+        self.assertEqual(response.status_code, 403)
         with self.app.app_context():
-            self.assertFalse(User.query.filter_by(login_id="0123456789").one().is_admin)
+            self.assertIsNone(User.query.filter_by(login_id="0123456789").first())
 
     def test_admin_page_rejects_anonymous_and_authenticated_non_admin(self):
         self.assertEqual(self.client.get("/admin").status_code, 302)
         self.register("Asha", "0123456789")
         self.login("0123456789")
+        self.promote("0123456789")
         self.assertEqual(self.client.get("/admin").status_code, 403)
 
     def test_admin_page_shows_safe_operational_information(self):
@@ -75,6 +78,9 @@ class Stage8Tests(unittest.TestCase):
             db.session.commit()
             balances, unresolved = compute_global_user_balances()
 
+        self.client.post("/logout")
+        self.client.post("/admin/login", data={"username": "test-admin", "password": "test-admin-password"})
+
         page = self.client.get("/admin")
         self.assertEqual(page.status_code, 200)
         self.assertIn(b"Administration", page.data)
@@ -82,12 +88,12 @@ class Stage8Tests(unittest.TestCase):
         self.assertIn(b"1234567890", page.data)
         self.assertIn(b"Archived", page.data)
         self.assertIn(b"Active", page.data)
-        self.assertIn(b"Yes", page.data)
+        self.assertIn(b"User Management", page.data)
         self.assertNotIn(b"private-admin-hash", page.data)
         self.assertNotIn(b"password_hash", page.data)
         self.assertIn(f"{balances[users['0123456789']]:.2f}".encode(), page.data)
         self.assertIn(str(len(unresolved)).encode(), page.data)
-        self.assertIn(b"Admin", page.data)
+        self.assertIn(b"Administration", page.data)
 
     def test_admin_does_not_bypass_group_owner_or_immutable_history(self):
         group_id, record_id, users = self.seed()
@@ -99,11 +105,15 @@ class Stage8Tests(unittest.TestCase):
         self.assertEqual(self.client.post(f"/groups/{group_id}/expenses/{record_id}/edit", data=edit_data).status_code, 403)
         self.assertEqual(self.client.post(f"/groups/{group_id}/expenses/{record_id}/delete").status_code, 403)
         self.assertEqual(self.client.post(f"/groups/{group_id}/delete").status_code, 403)
+        self.assertEqual(self.client.get("/admin").status_code, 403)
+        self.client.post("/logout")
+        self.client.post("/admin/login", data={"username": "test-admin", "password": "test-admin-password"})
         self.assertEqual(self.client.get("/admin").status_code, 200)
+        self.assertEqual(self.client.get(f"/groups/{group_id}").status_code, 302)
         with self.app.app_context():
             self.assertEqual(db.session.get(Group, group_id).expense_records[0].revisions[0].expense.description, "Dinner")
 
-    def test_stage_eight_registers_no_admin_mutation_routes(self):
+    def test_admin_overview_stays_read_only_and_mutations_are_user_only(self):
         admin_rules = [rule for rule in self.app.url_map.iter_rules() if rule.endpoint == "main.admin_overview"]
         self.assertEqual(len(admin_rules), 1)
         self.assertEqual(admin_rules[0].methods, {"GET", "HEAD", "OPTIONS"})

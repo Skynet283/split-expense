@@ -7,7 +7,7 @@
   </a>
   <h2 class="mb-0 fw-bold"><i class="bi bi-people-fill me-2 text-primary"></i>{{ group.name }}{% if is_archived %} <span class="badge bg-secondary fs-6">Archived</span>{% endif %}</h2>
   <div class="ms-auto d-flex gap-2">
-    {% if is_owner and not is_archived %}<a href="{{ url_for('main.add_expense', group_id=group.id) }}" class="btn btn-success">
+    {% if not is_archived %}<a href="{{ url_for('main.add_expense', group_id=group.id) }}" class="btn btn-success">
       <i class="bi bi-plus-lg me-1"></i>Add Expense
     </a>
     {% endif %}
@@ -124,10 +124,12 @@
                 {% endif %}
               </td>
               <td class="text-center">
-                {% if is_owner and not is_archived %}<a href="{{ url_for('main.edit_expense', group_id=group.id, expense_id=record.id) }}"
+                {% if record.created_by_user_id == current_user.id and not is_archived %}<a href="{{ url_for('main.edit_expense', group_id=group.id, expense_id=record.id) }}"
                    class="btn btn-sm btn-outline-warning me-1" title="Edit as a new revision">
                   <i class="bi bi-pencil me-1"></i>Edit
                 </a>
+                {% endif %}
+                {% if is_owner and not is_archived %}
                 <form method="POST"
                       action="{{ url_for('main.delete_expense', group_id=group.id, expense_id=record.id) }}"
                       style="display:inline"
@@ -150,7 +152,7 @@
       <div class="card-body text-center text-muted py-5">
         <i class="bi bi-inbox fs-1 d-block mb-2"></i>
         No active expenses yet.
-        {% if is_owner and not is_archived %}<a href="{{ url_for('main.add_expense', group_id=group.id) }}">Add the first one!</a>{% endif %}
+        {% if not is_archived %}<a href="{{ url_for('main.add_expense', group_id=group.id) }}">Add the first one!</a>{% endif %}
       </div>
       {% endif %}
     </div>

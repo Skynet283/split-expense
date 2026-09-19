@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import openpyxl
 from sqlalchemy.exc import IntegrityError
+from werkzeug.security import generate_password_hash
 
 from app import create_app, initialize_database
 from config import Config
@@ -17,6 +18,7 @@ from expense_history import iter_active_expenses
 from helpers import compute_global_user_balances, compute_pairwise_user_obligations
 from models import (ConfirmedSettlement, Expense, ExpenseRecord, ExpenseRevision, ExpenseSplit, Group,
                     GroupMembership, Member, SettlementRequest, User)
+from test_factory import create_user
 
 
 class TestConfig(Config):
@@ -26,6 +28,8 @@ class TestConfig(Config):
     INITIAL_ADMIN_ID = "9999999999"
     INITIAL_ADMIN_PASSWORD = "test-admin-password"
     INITIAL_ADMIN_NAME = "Test Administrator"
+    ADMIN_USERNAME = "test-admin"
+    ADMIN_PASSWORD_HASH = generate_password_hash("test-admin-password")
 
 
 class Stage6Tests(unittest.TestCase):
@@ -37,8 +41,7 @@ class Stage6Tests(unittest.TestCase):
         self.client = self.app.test_client()
 
     def register(self, name, login_id):
-        self.client.post("/register", data={"name": name, "login_id": login_id,
-                                             "password": "secret", "confirm_password": "secret"})
+        create_user(self.app, name, login_id)
 
     def login(self, login_id):
         self.client.post("/login", data={"login_id": login_id, "password": "secret"})

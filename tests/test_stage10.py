@@ -147,10 +147,11 @@ class Stage10Tests(unittest.TestCase):
             self.client.post('/settlement-requests', data={'recipient_user_id': users['0123456789'], 'amount': '10.00'})
         self.assertEqual(self.database_state(), before)
         self.client.post('/logout')
+        self.client.post('/admin/login', data={'username': 'test-admin', 'password': 'test-admin-password'})
         with patch.object(db.session, 'commit', side_effect=fail_commit), self.assertLogs('routes', level='ERROR'):
-            response = self.client.post('/register', data={'name': 'Dara', 'login_id': '3456789012',
-                                                        'password': 'secret', 'confirm_password': 'secret'})
-        self.assertEqual(response.status_code, 200)
+            response = self.client.post('/admin/users', data={'name': 'Dara', 'login_id': '3456789012',
+                                                               'password': 'secret', 'confirm_password': 'secret'})
+        self.assertEqual(response.status_code, 302)
         self.assertEqual(self.database_state(), before)
 
     def test_authentication_cross_group_admin_and_http_method_boundaries(self):
@@ -175,7 +176,15 @@ class Stage10Tests(unittest.TestCase):
         with self.app.app_context():
             db.session.get(User, users['1234567890']).is_admin = True
             db.session.commit()
-        for endpoint in (f'/groups/{group_id}/expenses/new', f'/groups/{group_id}/expenses/{record_id}/edit',
+        self.assertEqual(self.client.get('/admin').status_code, 403)
+        created = self.client.post(f'/groups/{group_id}/expenses/new', data={
+            'description': 'Member-created expense', 'paid_by': users['1234567890'],
+            'expense_type': 'equal', 'amount': '10.00',
+            'shared_by': [users['0123456789'], users['1234567890']],
+        }, follow_redirects=True)
+        self.assertEqual(created.status_code, 200)
+        self.assertIn(b'Expense added!', created.data)
+        for endpoint in (f'/groups/{group_id}/expenses/{record_id}/edit',
                          f'/groups/{group_id}/expenses/{record_id}/delete', f'/groups/{group_id}/delete'):
             self.assertEqual(self.client.post(endpoint).status_code, 403)
         for endpoint in (f'/groups/{other_id}', f'/groups/{other_id}/export'):

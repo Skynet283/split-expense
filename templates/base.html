@@ -14,17 +14,28 @@
     .badge-equal  { background-color: #0d6efd; }
     .badge-custom { background-color: #6f42c1; }
     .settled { color: #6c757d; font-style: italic; }
+    .user-picker-list { max-height: 16rem; overflow-y: auto; }
+    .user-picker-option { min-height: 3rem; }
+    .selected-user-chip .btn-close { font-size: .55rem; }
   </style>
 </head>
 <body>
 <nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-4 shadow-sm" aria-label="Main navigation">
   <div class="container">
     <a class="navbar-brand" href="{{ url_for('main.index') }}"><i class="bi bi-cash-coin me-2"></i>Expense Splitter</a>
-    {% if current_user.is_authenticated %}
+    {% if admin_authenticated() %}
+    <div class="d-flex align-items-center gap-2 text-white">
+      <a href="{{ url_for('main.admin_overview') }}" class="btn btn-sm btn-outline-light">User Management</a>
+      <form method="POST" action="{{ url_for('main.admin_logout') }}" class="m-0">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <button class="btn btn-sm btn-outline-light">Log out</button>
+      </form>
+    </div>
+    {% elif current_user.is_authenticated %}
     <div class="d-flex flex-wrap align-items-center justify-content-end gap-2 text-white">
       <a href="{{ url_for('main.index') }}" class="btn btn-sm btn-outline-light">Groups</a>
+      <a href="{{ url_for('main.activity_history') }}" class="btn btn-sm btn-outline-light">Activity</a>
       <span class="small"><i class="bi bi-person-circle me-1"></i>{{ current_user.name or current_user.login_id }}</span>
-      {% if current_user.is_admin %}<a href="{{ url_for('main.admin_overview') }}" class="btn btn-sm btn-outline-light">Admin</a>{% endif %}
       <form method="POST" action="{{ url_for('main.logout') }}" class="m-0">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
         <button class="btn btn-sm btn-outline-light">Log out</button>

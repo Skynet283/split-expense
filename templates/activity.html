@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+  <div>
+    <h2 class="fw-bold mb-1"><i class="bi bi-clock-history me-2 text-primary"></i>Global Activity</h2>
+    <p class="text-muted mb-0">Expense activity across all groups you can access.</p>
+  </div>
+</div>
+
+{% if events %}
+<div class="list-group">
+  {% for event in events %}
+  <div class="list-group-item p-3">
+    <div class="d-flex flex-wrap justify-content-between gap-2">
+      <div>
+        <strong>{{ event.actor.name or event.actor.login_id }}</strong>
+        {% if event.event_type == "expense_created" %}
+          added “{{ event.details.get('description') or 'Untitled expense' }}” — ₹{{ event.details.get('amount') }}
+        {% elif event.event_type == "expense_revised" %}
+          edited “{{ event.details.get('description') or 'Untitled expense' }}” — ₹{{ event.details.get('before_amount') }} → ₹{{ event.details.get('after_amount') }}
+        {% endif %}
+        <div class="small mt-1">
+          <a href="{{ url_for('main.view_group', group_id=event.group_id) }}">{{ event.group.name }}</a>
+          · <a href="{{ url_for('main.expense_history', group_id=event.group_id, expense_id=event.expense_record_id) }}">Expense history</a>
+        </div>
+      </div>
+      <small class="text-muted">{{ event.created_at.strftime('%d %b %Y, %I:%M %p') }}</small>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card"><div class="card-body text-center text-muted py-5">No expense activity yet.</div></div>
+{% endif %}
+{% endblock %}

@@ -20,9 +20,46 @@
   </div>
 </div>
 
-<div class="card mb-4"><div class="card-header bg-dark text-white">Users</div>
-  <div class="table-responsive"><table class="table table-hover mb-0"><thead><tr><th>Name</th><th>Login ID</th><th>Admin</th></tr></thead>
-    <tbody>{% for user in users %}<tr><td>{{ user.name or "—" }}</td><td>{{ user.login_id }}</td><td>{{ "Yes" if user.is_admin else "No" }}</td></tr>{% endfor %}</tbody>
+<div class="card mb-4"><div class="card-header bg-dark text-white">User Management</div>
+  <div class="card-body border-bottom">
+    <h3 class="h6">Create user</h3>
+    <form method="POST" action="{{ url_for('main.admin_create_user') }}" class="row g-2 align-items-end">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <div class="col-sm-6 col-lg-3"><label for="new-name" class="form-label">Name</label><input id="new-name" name="name" class="form-control" maxlength="100" required /></div>
+      <div class="col-sm-6 col-lg-3"><label for="new-id" class="form-label">10-digit User ID</label><input id="new-id" name="login_id" class="form-control" inputmode="numeric" pattern="[0-9]{10}" maxlength="10" required /></div>
+      <div class="col-sm-6 col-lg-2"><label for="new-password" class="form-label">Initial password</label><input id="new-password" name="password" type="password" class="form-control" autocomplete="new-password" required /></div>
+      <div class="col-sm-6 col-lg-2"><label for="new-confirm" class="form-label">Confirm password</label><input id="new-confirm" name="confirm_password" type="password" class="form-control" autocomplete="new-password" required /></div>
+      <div class="col-lg-2"><button class="btn btn-primary w-100">Create user</button></div>
+    </form>
+  </div>
+  <div class="table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr><th>Name</th><th>User ID</th><th>Status</th><th>Groups</th><th>Global balance</th><th>Actions</th></tr></thead>
+    <tbody>{% for user in users %}{% set balance = balances.get(user.id, zero) %}<tr>
+      <td>{{ user.name or "—" }}</td><td class="font-monospace">{{ user.login_id }}</td>
+      <td><span class="badge {{ 'bg-success' if user.is_active else 'bg-secondary' }}">{{ 'Active' if user.is_active else 'Deactivated' }}</span></td>
+      <td>{{ user.memberships | length }}</td>
+      <td>{% if balance > zero %}Should receive ₹{{ "%.2f"|format(balance) }}{% elif balance < zero %}Should pay ₹{{ "%.2f"|format(-balance) }}{% else %}Settled{% endif %}</td>
+      <td>
+        <div class="d-flex flex-wrap gap-2">
+          {% if user.is_active %}
+          <form method="POST" action="{{ url_for('main.admin_deactivate_user', user_id=user.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <button class="btn btn-sm btn-outline-danger">Deactivate</button>
+          </form>
+          {% else %}
+          <form method="POST" action="{{ url_for('main.admin_reactivate_user', user_id=user.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <button class="btn btn-sm btn-outline-success">Reactivate</button>
+          </form>
+          {% endif %}
+          <form method="POST" action="{{ url_for('main.admin_reset_password', user_id=user.id) }}" class="d-flex flex-wrap gap-1">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <input name="password" type="password" class="form-control form-control-sm" autocomplete="new-password" placeholder="New password" aria-label="New password for {{ user.name or user.login_id }}" required />
+            <input name="confirm_password" type="password" class="form-control form-control-sm" autocomplete="new-password" placeholder="Confirm password" aria-label="Confirm password for {{ user.name or user.login_id }}" required />
+            <button class="btn btn-sm btn-outline-primary">Reset Password</button>
+          </form>
+        </div>
+      </td>
+    </tr>{% else %}<tr><td colspan="6" class="text-muted">No users have been created yet.</td></tr>{% endfor %}</tbody>
   </table></div>
 </div>
 

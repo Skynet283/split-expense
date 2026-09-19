@@ -7,6 +7,7 @@ from config import Config
 from extensions import db
 from helpers import compute_balances
 from models import Expense, Group, GroupMembership, User
+from test_factory import create_user
 
 
 class TestConfig(Config):
@@ -27,21 +28,12 @@ class Stage1Tests(unittest.TestCase):
         self.client = self.app.test_client()
 
     def register(self, name, login_id, password="secret"):
-        return self.client.post("/register", data={
-            "name": name, "login_id": login_id, "password": password,
-            "confirm_password": password,
-        }, follow_redirects=True)
+        return create_user(self.app, name, login_id, password)
 
     def login(self, login_id, password="secret"):
         return self.client.post("/login", data={"login_id": login_id, "password": password}, follow_redirects=True)
 
-    def test_registration_validation_and_hashing(self):
-        invalid_ids = ("123456789", "12345678901", "abcdefghij", "12345 6789")
-        for login_id in invalid_ids:
-            with self.subTest(login_id=login_id):
-                response = self.register("Asha", login_id)
-                self.assertIn(b"exactly 10 digits", response.data)
-
+    def test_test_fixture_creates_hashed_user_without_public_registration(self):
         self.register("Asha", "0123456789", "secure-password")
         with self.app.app_context():
             user = User.query.filter_by(login_id="0123456789").one()
@@ -49,8 +41,9 @@ class Stage1Tests(unittest.TestCase):
             self.assertNotEqual(user.password_hash, "secure-password")
             self.assertTrue(check_password_hash(user.password_hash, "secure-password"))
 
-        response = self.register("Other Asha", "0123456789")
-        self.assertIn(b"already registered", response.data)
+        self.assertEqual(self.client.get("/register").status_code, 403)
+        self.assertEqual(self.client.post("/register", data={"name": "Other Asha", "login_id": "1234567890",
+                                                               "password": "secret"}).status_code, 403)
 
     def test_login_accepts_correct_password_and_rejects_wrong_one(self):
         self.register("Asha", "0123456789", "secure-password")
@@ -92,7 +85,7 @@ class Stage1Tests(unittest.TestCase):
         self.client.post("/logout")
         self.login("1234567890")
         self.assertEqual(self.client.get(f"/groups/{group_id}").status_code, 200)
-        self.assertEqual(self.client.get(f"/groups/{group_id}/expenses/new").status_code, 403)
+        self.assertEqual(self.client.get(f"/groups/{group_id}/expenses/new").status_code, 200)
 
         self.client.post("/logout")
         self.login("2345678901")
