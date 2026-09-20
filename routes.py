@@ -93,6 +93,13 @@ def validate_expense_participant_payload(form, eligible_ids, label):
                 raise ValueError("Select valid active group members.") from None
             if selected_id not in eligible_ids:
                 raise ValueError(f"Select valid {label} to share the expense; participants must be active.")
+        if key.startswith("share_") and key != "share_total":
+            try:
+                selected_id = int(key[len("share_"):])
+            except ValueError:
+                raise ValueError("Select valid active group members.") from None
+            if selected_id not in eligible_ids:
+                raise ValueError(f"Select valid {label} to share the expense; participants must be active.")
 
 
 def active_legacy_members(group):
@@ -202,10 +209,10 @@ def admin_required(view):
 
 def admin_session_proof():
     username = current_app.config.get("ADMIN_USERNAME")
-    password_hash = current_app.config.get("ADMIN_PASSWORD_HASH")
-    if not username or not password_hash:
+    password = current_app.config.get("ADMIN_PASSWORD")
+    if not username or not password:
         return None
-    credentials = f"{username}\0{password_hash}".encode()
+    credentials = f"{username}\0{password}".encode()
     return hmac.new(current_app.secret_key.encode(), credentials, hashlib.sha256).hexdigest()
 
 
@@ -287,11 +294,11 @@ def admin_login():
         return redirect(url_for("main.admin_overview"))
     if request.method == "POST":
         username = current_app.config.get("ADMIN_USERNAME")
-        password_hash = current_app.config.get("ADMIN_PASSWORD_HASH")
+        configured_password = current_app.config.get("ADMIN_PASSWORD")
         supplied_username = request.form.get("username", "")
-        password = request.form.get("password", "")
-        if (username and password_hash and hmac.compare_digest(supplied_username, username)
-                and check_password_hash(password_hash, password)):
+        supplied_password = request.form.get("password", "")
+        if (username and configured_password and hmac.compare_digest(supplied_username, username)
+                and hmac.compare_digest(supplied_password, configured_password)):
             session.clear()
             session["_admin_auth"] = admin_session_proof()
             flash("You are signed in as administrator.", "success")
@@ -610,13 +617,16 @@ def view_group(group_id):
     group = current_users_group(group_id)
     expense_records = active_expense_records(group)
     balances = compute_balances(group)
+    show_group_suggested_payments = current_app.config["SHOW_GROUP_SUGGESTED_PAYMENTS"]
+    settlements = compute_settlements(balances) if show_group_suggested_payments else None
     user_balances = compute_user_balances(group)
     has_unmapped_legacy_expenses = any(
         expense.paid_by_user_id is None or any(split.user_id is None for split in expense.splits)
         for expense in iter_active_expenses(group)
     )
     return render_template("group.html", group=group, balances=balances,
-                           settlements=compute_settlements(balances),
+                           settlements=settlements,
+                           show_group_suggested_payments=show_group_suggested_payments,
                            member_map={member.id: member.name for member in group.members}, zero=ZERO,
                            is_owner=(group.owner_id == current_user.id), user_balances=user_balances,
                            has_unmapped_legacy_expenses=has_unmapped_legacy_expenses,
@@ -690,15 +700,19 @@ def edit_expense(group_id, expense_id):
     if is_global_expense:
         participants, participant_labels, shared_ids, current_splits = global_expense_context(group, expense)
         selected_payer_id = expense.paid_by_user_id
+        current_shares = {split.user_id: split.share_weight for split in expense.splits
+                          if split.user_id is not None and split.share_weight is not None}
     else:
         participants = active_legacy_members(group)
         participant_labels = {member.id: member.name for member in participants}
         current_splits = {split.member_id: split.amount_owed for split in expense.splits}
         shared_ids = list(current_splits)
         selected_payer_id = expense.paid_by_id
+        current_shares = {split.member_id: split.share_weight for split in expense.splits
+                          if split.share_weight is not None}
     return render_template("edit_expense.html", group=group, record=record, expense=expense, participants=participants,
                            participant_labels=participant_labels, current_splits=current_splits,
-                           shared_ids=shared_ids, selected_payer_id=selected_payer_id)
+                           current_shares=current_shares, shared_ids=shared_ids, selected_payer_id=selected_payer_id)
 
 
 @main.post("/groups/<int:group_id>/expenses/<int:expense_id>/delete")

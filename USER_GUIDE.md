@@ -25,6 +25,7 @@ Any **active member** of an unarchived group can open that group and select **Ad
 
 - **Equal Split:** enter the total and check the active people who shared it. The amount is divided among those selected.
 - **Custom Split:** enter the total and each active person's amount. The individual amounts must add up to the total.
+- **Split by Shares:** enter the total and a share weight for each participating active person. Weights may be positive whole numbers or decimals. Enter `0` to include someone who owes ₹0, or leave their field blank to exclude them. At least one weight must be greater than zero. The form previews the calculated amounts; the server calculates and stores the final cent amounts when you submit.
 
 The payer and participants must belong to the group and be active. Inactive members are absent from the new-expense form; manually submitted inactive IDs are rejected. Invalid amounts or participants do not create a partial expense. A successful expense appears in the group's expense log and affects balances.
 
@@ -44,7 +45,7 @@ Select **Activity** in the top navigation to see expense additions and revisions
 
 ## 8. Balances
 
-Each group shows **Group Expense Balances** and suggested expense payments for its members. The dashboard's **Global Settle Up** combines direct obligations across groups, including archived groups, and confirmed settlements. You may owe one person while another person owes you, even when your overall net position is zero. Older expenses without a reliable registered-user link remain in the group's legacy balance view but are not assigned to a global User by guessing a name.
+Each group shows **Group Expense Balances**. Its **Suggested Expense Payments** card is hidden by default but may be enabled by the application operator. The dashboard's **Global Settle Up** remains available regardless of that card and combines direct obligations across groups, including archived groups, and confirmed settlements. You may owe one person while another person owes you, even when your overall net position is zero. Older expenses without a reliable registered-user link remain in the group's legacy balance view but are not assigned to a global User by guessing a name.
 
 ## 9. Global Settle Up
 
@@ -62,25 +63,21 @@ Only the group owner can select **Archive** from the active group list. Archivin
 
 The administrator signs in through **Administrator sign in** on the normal sign-in page, or at `/admin/login`. This is a separate backend-controlled login, not a normal user account.
 
-Before starting the app, the operator must configure these environment variables:
+Before starting the app, create a `.env` file in the project root with these settings:
 
 - `ADMIN_USERNAME`: the administrator's chosen username.
-- `ADMIN_PASSWORD_HASH`: a Werkzeug-generated hash of the administrator's password, **not** the plaintext password.
+- `ADMIN_PASSWORD`: the administrator's chosen password.
 
-If either value is missing, administrator sign-in cannot succeed. To generate a hash using the project's Python environment, run this in PowerShell; it prompts for the password without putting it on the command line:
+For example, replace both placeholders with your own values:
 
-```powershell
-.\myenv\Scripts\python.exe -c "from getpass import getpass; from werkzeug.security import generate_password_hash; print(generate_password_hash(getpass('Admin password: ')))"
+```dotenv
+ADMIN_USERNAME=<chosen-admin-username>
+ADMIN_PASSWORD=<chosen-admin-password>
 ```
 
-Set `ADMIN_USERNAME` and `ADMIN_PASSWORD_HASH` in the app process's environment, using your own username and the generated output. For example, in the PowerShell session that starts the app:
+The app loads `.env` automatically at startup; values already set in the process environment take precedence. Both settings must be present for administrator sign-in. Unlike normal user passwords, this local administrator password is stored as plaintext in `.env`: keep the file private, never share it, and do not commit it to Git. The repository ignores `.env`. The application also needs a stable `SECRET_KEY` for sessions; production mode requires it. The older `INITIAL_ADMIN_ID` bootstrap setting creates a **normal user**, not this administrator.
 
-```powershell
-$env:ADMIN_USERNAME = '<chosen-admin-username>'
-$env:ADMIN_PASSWORD_HASH = '<generated-hash>'
-```
-
-Do not commit credentials or hashes to Git. The application also needs a stable `SECRET_KEY` for sessions; production mode requires it. The older `INITIAL_ADMIN_ID` bootstrap setting creates a **normal user**, not this administrator.
+The application setting `SHOW_GROUP_SUGGESTED_PAYMENTS` in `config.py` defaults to `False`, hiding the suggested-payment card inside individual groups. Set it to `True` to show that card using the existing suggestions. This setting does not change **Global Settle Up**, balances, or settlements.
 
 ## 12. Admin Dashboard
 
@@ -144,4 +141,4 @@ User Management does not reveal plaintext passwords, delete users, or grant arbi
 - **Cannot edit an expense?** Only its creator can revise it. Voided expenses, archived groups, and expenses involving a currently deactivated participant cannot be revised.
 - **Cannot deactivate a user?** Resolve their global balance, all direct obligations, and all pending settlement requests first.
 - **A settlement is still pending?** The recipient has not confirmed or rejected it. Pending amounts reserve availability but are not completed payments.
-- **Admin sign-in fails?** Confirm that `ADMIN_USERNAME` and `ADMIN_PASSWORD_HASH` are set in the app process's environment, and sign in at `/admin/login` with the password used to generate the hash.
+- **Admin sign-in fails?** Confirm that `.env` in the project root contains `ADMIN_USERNAME` and `ADMIN_PASSWORD`, then restart the app. Existing process environment values take precedence over `.env`. Sign in at `/admin/login` using those credentials.

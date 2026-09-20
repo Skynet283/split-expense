@@ -267,6 +267,66 @@ def compute_settlements(balances):
     return settlements
 
 
+def parse_share_value(value, field_name):
+    """Accept a bounded, exact, nonnegative decimal weight (zero is valid)."""
+    raw = str(value).strip()
+    if len(raw) > 100:
+        raise ValueError(f"Share value for {field_name} is outside the supported range.")
+    try:
+        share = Decimal(raw)
+    except (InvalidOperation, ValueError):
+        raise ValueError(f"Enter a valid share value for {field_name}.") from None
+    if not share.is_finite() or share < 0:
+        raise ValueError(f"Enter a nonnegative, finite share value for {field_name}.")
+    if share == 0:
+        return Decimal(0)
+    # Bound work and storage for hostile exponents/huge coefficients. This is
+    # far beyond normal share inputs while keeping integer allocation finite.
+    if len(share.as_tuple().digits) > 36 or abs(share.as_tuple().exponent) > 36:
+        raise ValueError(f"Share value for {field_name} is outside the supported range.")
+    return share
+
+
+def parse_share_inputs(form, participants):
+    """Blank fields omit a person; an explicit zero retains that participant."""
+    shares = {}
+    for participant in participants:
+        values = form.getlist(f"share_{participant.id}")
+        if len(values) > 1:
+            raise ValueError("Enter one share value per participant.")
+        if not values or not values[0].strip():
+            continue
+        name = getattr(participant, "name", None) or getattr(participant, "login_id", str(participant.id))
+        shares[participant.id] = parse_share_value(values[0], name)
+    if not any(share > 0 for share in shares.values()):
+        raise ValueError("At least one participant must have more than zero shares.")
+    return shares
+
+
+def allocate_share_amounts(amount, shares):
+    """Allocate exact cents by largest fractional remainder, then stable ID."""
+    scale = max(0, -min(share.as_tuple().exponent for share in shares.values() if share))
+    integer_weights = {}
+    for participant_id, share in shares.items():
+        if not share:
+            integer_weights[participant_id] = 0
+            continue
+        decimal_tuple = share.as_tuple()
+        coefficient = int("".join(str(digit) for digit in decimal_tuple.digits))
+        integer_weights[participant_id] = coefficient * 10 ** (decimal_tuple.exponent + scale)
+    total_weight = sum(integer_weights.values())
+    if total_weight <= 0:
+        raise ValueError("At least one participant must have more than zero shares.")
+    total_cents = int(amount / CENT)
+    cents, remainders = {}, {}
+    for participant_id, weight in integer_weights.items():
+        cents[participant_id], remainders[participant_id] = divmod(total_cents * weight, total_weight)
+    leftover = total_cents - sum(cents.values())
+    for participant_id in sorted(shares, key=lambda key: (-remainders[key], key))[:leftover]:
+        cents[participant_id] += 1
+    return {participant_id: Decimal(cents[participant_id]) * CENT for participant_id in sorted(shares)}
+
+
 def save_splits(expense, members, expense_type, form, maximum):
     """Validate and create split rows for an expense."""
     if expense_type == "equal":
@@ -287,8 +347,19 @@ def save_splits(expense, members, expense_type, form, maximum):
         expense.amount = amount
         return
 
+    if expense_type == "shares":
+        amount = parse_money(form.get("share_total"), "total amount", maximum)
+        shares = parse_share_inputs(form, members)
+        allocations = allocate_share_amounts(amount, shares)
+        for member_id, owed in allocations.items():
+            split = create_expense_split(expense.id, member_id, owed)
+            split.share_weight = str(shares[member_id])
+            db.session.add(split)
+        expense.amount = amount
+        return
+
     if expense_type != "custom":
-        raise ValueError("Choose either an equal or custom split.")
+        raise ValueError("Choose an equal, custom, or shares split.")
 
     expected_total = parse_money(form.get("custom_total"), "total amount", maximum)
     split_total = ZERO
@@ -323,8 +394,19 @@ def save_user_splits(expense, users, legacy_members_by_user, expense_type, form,
         expense.amount = amount
         return
 
+    if expense_type == "shares":
+        amount = parse_money(form.get("share_total"), "total amount", maximum)
+        shares = parse_share_inputs(form, users)
+        allocations = allocate_share_amounts(amount, shares)
+        for user_id, owed in allocations.items():
+            split = create_user_expense_split(expense.id, legacy_members_by_user[user_id].id, user_id, owed)
+            split.share_weight = str(shares[user_id])
+            db.session.add(split)
+        expense.amount = amount
+        return
+
     if expense_type != "custom":
-        raise ValueError("Choose either an equal or custom split.")
+        raise ValueError("Choose an equal, custom, or shares split.")
     expected_total = parse_money(form.get("custom_total"), "total amount", maximum)
     split_total = ZERO
     for user in users:

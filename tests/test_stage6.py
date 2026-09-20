@@ -9,7 +9,6 @@ from unittest.mock import patch
 
 import openpyxl
 from sqlalchemy.exc import IntegrityError
-from werkzeug.security import generate_password_hash
 
 from app import create_app, initialize_database
 from config import Config
@@ -29,7 +28,7 @@ class TestConfig(Config):
     INITIAL_ADMIN_PASSWORD = "test-admin-password"
     INITIAL_ADMIN_NAME = "Test Administrator"
     ADMIN_USERNAME = "test-admin"
-    ADMIN_PASSWORD_HASH = generate_password_hash("test-admin-password")
+    ADMIN_PASSWORD = "test-admin-password"
 
 
 class Stage6Tests(unittest.TestCase):

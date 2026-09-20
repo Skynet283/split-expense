@@ -45,11 +45,16 @@
               <label class="btn btn-outline-secondary" for="type_custom">
                 <i class="bi bi-sliders me-1"></i>Custom Split
               </label>
+              <input type="radio" class="btn-check" name="expense_type" id="type_shares" value="shares"
+                     {% if expense.expense_type == "shares" %}checked{% endif %} />
+              <label class="btn btn-outline-success" for="type_shares">
+                <i class="bi bi-pie-chart me-1"></i>Split by Shares
+              </label>
             </div>
           </div>
 
           <!-- Equal Split -->
-          <div id="equal_section" {% if expense.expense_type == "custom" %}style="display:none"{% endif %}>
+          <div id="equal_section" {% if expense.expense_type != "equal" %}style="display:none"{% endif %}>
             <div class="mb-3">
               <label class="form-label fw-semibold">Total Amount (₹)</label>
               <input type="number" name="amount" class="form-control" step="0.01" min="0.01"
@@ -90,6 +95,30 @@
             <p class="text-muted small">Split total: ₹<span id="customTotal">0.00</span> (must match the total amount)</p>
           </div>
 
+          <!-- Share Split -->
+          <div id="shares_section" {% if expense.expense_type != "shares" %}style="display:none"{% endif %}>
+            <div class="mb-3">
+              <label for="shareAmount" class="form-label fw-semibold">Total Amount (₹)</label>
+              <input id="shareAmount" type="number" name="share_total" class="form-control"
+                     step="0.01" min="0.01"
+                     value="{{ '%.2f'|format(expense.amount) if expense.expense_type == 'shares' else '' }}"
+                     placeholder="0.00" />
+            </div>
+            <label class="form-label fw-semibold">Shares per Person</label>
+            <p class="text-muted small">Enter 0 to include someone with ₹0 owed; leave blank to exclude them.</p>
+            {% for participant in participants %}
+            <div class="input-group mb-2">
+              <span class="input-group-text flex-grow-1">{{ participant_labels[participant.id] }}</span>
+              <input type="number" name="share_{{ participant.id }}" class="form-control share-input"
+                     step="any" min="0" data-participant-id="{{ participant.id }}"
+                     value="{{ current_shares.get(participant.id, '') if expense.expense_type == 'shares' else '1' }}"
+                     aria-label="Shares for {{ participant_labels[participant.id] }}" />
+              <span class="input-group-text">₹<span class="share-amount">0.00</span></span>
+            </div>
+            {% endfor %}
+            <p class="text-muted small">Total shares: <span id="shareTotal">0</span></p>
+          </div>
+
           <button type="submit" class="btn btn-warning w-100 mt-2">
             <i class="bi bi-save me-1"></i>Save New Revision
           </button>
@@ -102,14 +131,15 @@
 
 {% block scripts %}
 <script>
-  // Toggle equal / custom sections
+  // Toggle the split sections
   document.querySelectorAll('input[name="expense_type"]').forEach(radio => {
     radio.addEventListener('change', function () {
-      const isEqual = this.value === 'equal';
-      document.getElementById('equal_section').style.display  = isEqual ? '' : 'none';
-      document.getElementById('custom_section').style.display = isEqual ? 'none' : '';
-      if (!isEqual) updateCustomTotal();
-      else           updateHint();
+      for (const type of ['equal', 'custom', 'shares']) {
+        document.getElementById(`${type}_section`).style.display = this.value === type ? '' : 'none';
+      }
+      if (this.value === 'custom') updateCustomTotal();
+      if (this.value === 'equal') updateHint();
+      if (this.value === 'shares') updateSharePreview();
     });
   });
 
@@ -136,5 +166,34 @@
   }
   document.querySelectorAll('.custom-amt').forEach(inp => inp.addEventListener('input', updateCustomTotal));
   updateCustomTotal();
+
+  // Preview only; the server parses weights and allocates the stored cents.
+  function updateSharePreview() {
+    const inputs = [...document.querySelectorAll('.share-input')];
+    const entries = inputs.map(input => ({input, value: input.value.trim(), weight: Number(input.value)}));
+    const included = entries.filter(entry => entry.value !== '');
+    const totalShares = included.reduce((sum, entry) => sum + entry.weight, 0);
+    const totalAmount = Number(document.getElementById('shareAmount').value);
+    document.getElementById('shareTotal').textContent = Number.isFinite(totalShares) ? `${totalShares}` : '—';
+    inputs.forEach(input => { input.parentElement.querySelector('.share-amount').textContent = '—'; });
+    if (!Number.isFinite(totalAmount) || totalAmount <= 0 || !Number.isFinite(totalShares) ||
+        totalShares <= 0 || included.some(entry => !Number.isFinite(entry.weight) || entry.weight < 0)) return;
+    const totalCents = Math.round(totalAmount * 100);
+    const parts = included.map(entry => {
+      const exact = totalCents * entry.weight / totalShares;
+      const cents = Math.floor(exact);
+      return {...entry, cents, fraction: exact - cents};
+    });
+    let remainder = totalCents - parts.reduce((sum, part) => sum + part.cents, 0);
+    [...parts].sort((a, b) => b.fraction - a.fraction ||
+      Number(a.input.dataset.participantId) - Number(b.input.dataset.participantId))
+      .slice(0, remainder).forEach(part => { part.cents += 1; });
+    parts.forEach(part => {
+      part.input.parentElement.querySelector('.share-amount').textContent = (part.cents / 100).toFixed(2);
+    });
+  }
+  document.getElementById('shareAmount').addEventListener('input', updateSharePreview);
+  document.querySelectorAll('.share-input').forEach(input => input.addEventListener('input', updateSharePreview));
+  updateSharePreview();
 </script>
 {% endblock %}

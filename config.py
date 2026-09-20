@@ -1,6 +1,11 @@
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+
+load_dotenv(Path(__file__).resolve().parent / ".env")
+
 
 class Config:
     """Application configuration, overridable through environment variables."""
@@ -19,9 +24,10 @@ class Config:
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     MAX_EXPENSE_AMOUNT = 1_000_000
+    SHOW_GROUP_SUGGESTED_PAYMENTS = False
     # Separate backend administrator. Set both values to enable management.
     ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME")
-    ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH")
+    ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
     # Optional explicit bootstrap account, never automatically an administrator.
     INITIAL_ADMIN_ID = os.environ.get("INITIAL_ADMIN_ID")
     INITIAL_ADMIN_NAME = os.environ.get("INITIAL_ADMIN_NAME", "Administrator")

@@ -97,6 +97,9 @@ class ExpenseSplit(db.Model):
     member_id = db.Column(db.Integer, db.ForeignKey("member.id"), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True, index=True)
     amount_owed = db.Column(db.Numeric(12, 2), nullable=False)
+    # Original input for share-based snapshots. A string retains exact decimal
+    # weights (including zero) without changing the cent-valued ledger amount.
+    share_weight = db.Column(db.String(100), nullable=True)
     member = db.relationship("Member", foreign_keys=[member_id])
     user = db.relationship("User", foreign_keys=[user_id])
 

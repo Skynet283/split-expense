@@ -56,6 +56,7 @@
       </ul>
     </div>
 
+    {% if show_group_suggested_payments %}
     <!-- Suggested Payments -->
     <div class="card">
       <div class="card-header bg-success text-white">
@@ -76,6 +77,7 @@
         {% endif %}
       </div>
     </div>
+    {% endif %}
 
   </div>
 
@@ -119,6 +121,8 @@
               <td>
                 {% if exp.expense_type == "equal" %}
                   <span class="badge bg-primary">Equal</span>
+                {% elif exp.expense_type == "shares" %}
+                  <span class="badge bg-success">Shares</span>
                 {% else %}
                   <span class="badge" style="background:#6f42c1">Custom</span>
                 {% endif %}

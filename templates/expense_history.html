@@ -17,9 +17,9 @@
       <strong>Version {{ revision.version_number }}{% if record.current_expense_id == expense.id %} <span class="badge bg-success">Current version</span>{% endif %}</strong>
       <small class="text-muted">Recorded {{ revision.recorded_at.strftime('%d %b %Y, %I:%M %p') }}{% if revision.recorded_by_user %} by {{ revision.recorded_by_user.name or revision.recorded_by_user.login_id }}{% endif %}</small>
     </div>
-    <div>{{ expense.description or "—" }} · ₹{{ "%.2f"|format(expense.amount) }} · paid by {{ expense.paid_by.name }}</div>
+    <div>{{ expense.description or "—" }} · ₹{{ "%.2f"|format(expense.amount) }} · paid by {{ expense.paid_by.name }} · {{ expense.expense_type|title }} split</div>
     <small class="text-muted">
-      {% for split in expense.splits %}{{ split.member.name }} (₹{{ "%.2f"|format(split.amount_owed) }}){% if not loop.last %}, {% endif %}{% endfor %}
+      {% for split in expense.splits %}{{ split.member.name }}{% if expense.expense_type == "shares" and split.share_weight is not none %} ({{ split.share_weight }} shares → ₹{{ "%.2f"|format(split.amount_owed) }}){% else %} (₹{{ "%.2f"|format(split.amount_owed) }}){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
     </small>
   </div>
   {% endfor %}

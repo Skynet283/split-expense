@@ -50,8 +50,14 @@ def _money(value):
 
 
 def expense_snapshots_equal(first, second):
-    first_splits = sorted((split.member_id, split.user_id, _money(split.amount_owed)) for split in first.splits)
-    second_splits = sorted((split.member_id, split.user_id, _money(split.amount_owed)) for split in second.splits)
+    first_splits = sorted((split.member_id, split.user_id, _money(split.amount_owed),
+                           split.share_weight is not None,
+                           Decimal(split.share_weight) if split.share_weight is not None else Decimal(0))
+                          for split in first.splits)
+    second_splits = sorted((split.member_id, split.user_id, _money(split.amount_owed),
+                            split.share_weight is not None,
+                            Decimal(split.share_weight) if split.share_weight is not None else Decimal(0))
+                           for split in second.splits)
     return (
         (first.description or "") == (second.description or "")
         and first.paid_by_id == second.paid_by_id

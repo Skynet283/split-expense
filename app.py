@@ -45,7 +45,7 @@ def initialize_database(app):
         additive_columns = {
             "member": {"user_id": "INTEGER"},
             "expense": {"paid_by_user_id": "INTEGER"},
-            "expense_split": {"user_id": "INTEGER"},
+            "expense_split": {"user_id": "INTEGER", "share_weight": "VARCHAR(100)"},
         }
         inspector = inspect(db.engine)
         for table_name, columns in additive_columns.items():

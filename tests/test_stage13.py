@@ -1,11 +1,15 @@
+import importlib.util
+import os
 import sqlite3
 import unittest
 from contextlib import closing
 from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
-from werkzeug.security import check_password_hash, generate_password_hash
+from dotenv import load_dotenv
+from werkzeug.security import check_password_hash
 
 from app import create_app
 from config import Config
@@ -23,7 +27,7 @@ class Stage13Config(Config):
     SQLALCHEMY_DATABASE_URI = "sqlite://"
     INITIAL_ADMIN_ID = None
     ADMIN_USERNAME = "backend-admin"
-    ADMIN_PASSWORD_HASH = generate_password_hash("admin-secret")
+    ADMIN_PASSWORD = "admin-secret"
 
 
 class Stage13Tests(unittest.TestCase):
@@ -118,6 +122,39 @@ class Stage13Tests(unittest.TestCase):
         self.admin_logout()
         self.assertEqual(self.user_login("3456789012", "new-secret").status_code, 302)
         self.assertIn(b"Your Groups", self.client.get("/").data)
+
+    def test_admin_login_requires_configured_plaintext_credentials(self):
+        for username, password in (("wrong-admin", "admin-secret"),
+                                   ("backend-admin", "wrong-password")):
+            with self.subTest(username=username, password=password):
+                response = self.post("/admin/login", {"username": username, "password": password},
+                                     token_path="/admin/login")
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(b"Invalid credentials", response.data)
+                self.assertEqual(self.client.get("/admin").status_code, 302)
+        self.assertEqual(self.admin_login().status_code, 302)
+        self.assertEqual(self.client.get("/admin").status_code, 200)
+
+    def test_project_dotenv_is_loaded_before_config_reads_admin_credentials(self):
+        config_path = Path(__file__).resolve().parents[1] / "config.py"
+        with TemporaryDirectory() as directory:
+            fixture_env = Path(directory) / ".env"
+            fixture_env.write_text("ADMIN_USERNAME=from-file\nADMIN_PASSWORD=fixture-secret\n", encoding="utf-8")
+            seen_paths = []
+
+            def load_fixture(requested_path):
+                seen_paths.append(Path(requested_path))
+                return load_dotenv(fixture_env)
+
+            with patch.dict(os.environ, {"ADMIN_USERNAME": "existing-environment"}):
+                os.environ.pop("ADMIN_PASSWORD", None)
+                with patch("dotenv.load_dotenv", side_effect=load_fixture):
+                    spec = importlib.util.spec_from_file_location("stage13_config_probe", config_path)
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)
+                self.assertEqual(module.Config.ADMIN_USERNAME, "existing-environment")
+                self.assertEqual(module.Config.ADMIN_PASSWORD, "fixture-secret")
+            self.assertEqual(seen_paths, [config_path.parent / ".env"])
 
     def test_admin_password_reset_replaces_old_password(self):
         self.admin_login()
