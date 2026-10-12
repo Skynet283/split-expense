@@ -1,3 +1,4 @@
+from test_factory import settlement_form_data
 import importlib.util
 import os
 import sqlite3
@@ -175,8 +176,8 @@ class Stage13Tests(unittest.TestCase):
             record_id = ExpenseRecord.query.one().id
         self.user_logout()
         self.user_login("1234567890")
-        self.post("/settlement-requests", {"recipient_user_id": self.ids["0123456789"],
-                                           "amount": "10.00"}, token_path="/")
+        self.post("/settlement-requests", settlement_form_data(self.client, {"recipient_user_id": self.ids["0123456789"],
+                                           "amount": "10.00"}), token_path="/")
         with self.app.app_context():
             request_id = SettlementRequest.query.one().id
         self.user_logout()
@@ -223,7 +224,7 @@ class Stage13Tests(unittest.TestCase):
             original_split = [(split.user_id, split.amount_owed) for split in record.current_expense.splits]
         self.user_logout()
         self.user_login("1234567890")
-        self.post("/settlement-requests", {"recipient_user_id": active_id, "amount": "10.00"}, token_path="/")
+        self.post("/settlement-requests", settlement_form_data(self.client, {"recipient_user_id": active_id, "amount": "10.00"}), token_path="/")
         with self.app.app_context():
             request_id = SettlementRequest.query.one().id
         self.user_logout()
@@ -310,35 +311,31 @@ class Stage13Tests(unittest.TestCase):
         with self.app.app_context():
             self.assertTrue(db.session.get(User, self.ids["0123456789"]).is_active)
 
-    def test_nonzero_balance_and_stale_pending_request_each_block_deactivation(self):
+    def test_balance_blocks_but_obsolete_pending_request_does_not_block_deactivation(self):
         group_id = self.make_group()
-        self.add_expense(group_id, "0123456789", "1234567890")
+        self.add_expense(group_id, '0123456789', '1234567890')
         self.user_logout()
         self.admin_login()
-        target = self.ids["1234567890"]
-        self.post(f"/admin/users/{target}/deactivate", token_path="/admin")
-        self.assertIn(b"outstanding global balance", self.client.get("/admin").data)
+        target = self.ids['1234567890']
+        self.post(f'/admin/users/{target}/deactivate', token_path='/admin')
+        self.assertIn(b'outstanding global balance', self.client.get('/admin').data)
         with self.app.app_context():
             self.assertTrue(db.session.get(User, target).is_active)
+            db.session.add(SettlementRequest(requester_user_id=target,
+                recipient_user_id=self.ids['0123456789'], amount=Decimal('10.00'), status='PENDING'))
+            db.session.commit()
         self.admin_logout()
-        self.user_login("1234567890")
-        self.post("/settlement-requests", {"recipient_user_id": self.ids["0123456789"],
-                                           "amount": "10.00"}, token_path="/")
-        self.user_logout()
         self.user_login()
         with self.app.app_context():
             record_id = ExpenseRecord.query.one().id
-        self.post(f"/groups/{group_id}/expenses/{record_id}/delete", token_path=f"/groups/{group_id}")
-        with self.app.app_context():
-            self.assertEqual(compute_global_user_balances()[0].get(target, Decimal("0.00")), Decimal("0.00"))
-            self.assertFalse(any(target in pair for pair in compute_pairwise_user_obligations()[0]))
-            self.assertEqual(SettlementRequest.query.filter_by(status="PENDING").count(), 1)
+        self.post(f'/groups/{group_id}/expenses/{record_id}/delete', token_path=f'/groups/{group_id}')
         self.user_logout()
         self.admin_login()
-        self.post(f"/admin/users/{target}/deactivate", token_path="/admin")
-        self.assertIn(b"pending settlement request", self.client.get("/admin").data)
+        self.post(f'/admin/users/{target}/deactivate', token_path='/admin')
         with self.app.app_context():
-            self.assertTrue(db.session.get(User, target).is_active)
+            self.assertFalse(db.session.get(User, target).is_active)
+            self.assertEqual(SettlementRequest.query.filter_by(status='PENDING').count(), 1)
+            self.assertEqual(ConfirmedSettlement.query.count(), 0)
 
     def test_inactive_user_is_hidden_and_rejected_by_group_backend(self):
         self.admin_login()

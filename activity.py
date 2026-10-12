@@ -1,7 +1,9 @@
 from decimal import Decimal
 
 from extensions import db
-from models import ActivityEvent
+from sqlalchemy import or_
+
+from models import ActivityEvent, ConfirmedSettlement, SettlementRequest
 
 
 def _money_text(value):
@@ -35,3 +37,26 @@ def record_expense_revised(record, before, after, actor_user_id):
             "after_amount": _money_text(after.amount),
         },
     ))
+
+
+def settlement_history_entries(user_id):
+    """Present payment audit sources in the existing history UI, privately.
+
+    Expense events retain their group visibility; a global payment is visible
+    only to its two participants. No synthetic group or expense is invented.
+    """
+    payments = ConfirmedSettlement.query.filter(or_(
+        ConfirmedSettlement.payer_user_id == user_id, ConfirmedSettlement.recipient_user_id == user_id)).all()
+    entries = []
+    for payment in payments:
+        entries.append({"kind": "payment", "created_at": payment.confirmed_at, "payment": payment})
+        if payment.reversal is not None:
+            entries.append({"kind": "reversal", "created_at": payment.reversal.reversed_at, "payment": payment})
+    # Include unmatched historical requests without claiming they were payments.
+    requests = SettlementRequest.query.filter(or_(
+        SettlementRequest.requester_user_id == user_id, SettlementRequest.recipient_user_id == user_id
+    )).filter(~SettlementRequest.id.in_(db.session.query(ConfirmedSettlement.settlement_request_id))).all()
+    for historical in requests:
+        entries.append({"kind": "legacy_request", "created_at": historical.created_at, "request": historical})
+    entries.sort(key=lambda entry: entry["created_at"], reverse=True)
+    return entries

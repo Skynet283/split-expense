@@ -1,3 +1,4 @@
+from test_factory import settlement_form_data
 import unittest
 from decimal import Decimal
 from io import BytesIO
@@ -117,15 +118,14 @@ class GroupSuggestedPaymentsTests(unittest.TestCase):
         self.logout()
         self.login("1234567890")
         self.app.config["SHOW_GROUP_SUGGESTED_PAYMENTS"] = False
-        response = self.post("/settlement-requests", {
-            "recipient_user_id": self.ids["0123456789"], "amount": "100.00"})
+        response = self.post("/settlement-requests", settlement_form_data(self.client, {
+            "recipient_user_id": self.ids["0123456789"], "amount": "100.00"}))
         self.assertEqual(response.status_code, 302)
         with self.app.app_context():
             settlement_request = SettlementRequest.query.one()
             request_id = settlement_request.id
-            self.assertEqual(settlement_request.status, "PENDING")
-            self.assertEqual(self.accounting_snapshot()[2][
-                (self.ids["1234567890"], self.ids["0123456789"])], Decimal("100.00"))
+            self.assertEqual(settlement_request.status, "CONFIRMED")
+            self.assertEqual(self.accounting_snapshot()[2], {})
         self.app.config["SHOW_GROUP_SUGGESTED_PAYMENTS"] = True
         self.logout()
         self.login("0123456789")

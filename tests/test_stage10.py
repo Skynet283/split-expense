@@ -1,3 +1,4 @@
+from test_factory import settlement_form_data
 import sqlite3
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -37,8 +38,8 @@ class Stage10Tests(unittest.TestCase):
 
     def request_payment(self, users, amount):
         self.switch_user('1234567890')
-        response = self.client.post('/settlement-requests', data={
-            'recipient_user_id': users['0123456789'], 'amount': amount})
+        response = self.client.post('/settlement-requests', data=settlement_form_data(self.client, {
+            'recipient_user_id': users['0123456789'], 'amount': amount}))
         self.assertEqual(response.status_code, 302)
         with self.app.app_context():
             request_id = SettlementRequest.query.order_by(SettlementRequest.id.desc()).first().id
@@ -144,7 +145,7 @@ class Stage10Tests(unittest.TestCase):
         self.switch_user('1234567890')
         before = self.database_state()
         with patch.object(db.session, 'commit', side_effect=fail_commit), self.assertLogs('routes', level='ERROR'):
-            self.client.post('/settlement-requests', data={'recipient_user_id': users['0123456789'], 'amount': '10.00'})
+            self.client.post('/settlement-requests', data=settlement_form_data(self.client, {'recipient_user_id': users['0123456789'], 'amount': '10.00'}))
         self.assertEqual(self.database_state(), before)
         self.client.post('/logout')
         self.client.post('/admin/login', data={'username': 'test-admin', 'password': 'test-admin-password'})
@@ -342,7 +343,7 @@ class Stage10Tests(unittest.TestCase):
             db.session.remove()
             db.engine.dispose()
 
-    def test_concurrent_request_creation_cannot_exceed_pending_limit(self):
+    def test_concurrent_immediate_creation_cannot_exceed_obligation(self):
         with TemporaryDirectory() as directory:
             self.file_app(directory)
             try:
@@ -360,12 +361,12 @@ class Stage10Tests(unittest.TestCase):
 
                 with patch.object(routes, 'parse_settlement_amount', side_effect=simultaneous_parse):
                     with ThreadPoolExecutor(max_workers=2) as executor:
-                        futures = [executor.submit(client.post, '/settlement-requests', data={
-                            'recipient_user_id': users['0123456789'], 'amount': '300.00'}) for client in clients]
+                        futures = [executor.submit(client.post, '/settlement-requests', data=settlement_form_data(client, {
+                            'recipient_user_id': users['0123456789'], 'amount': '300.00'})) for client in clients]
                         self.assertEqual([future.result(timeout=15).status_code for future in futures], [302, 302])
                 with self.app.app_context():
                     self.assertEqual(SettlementRequest.query.count(), 1)
-                    self.assertEqual(ConfirmedSettlement.query.count(), 0)
+                    self.assertEqual(ConfirmedSettlement.query.count(), 1)
             finally:
                 self.dispose()
 
@@ -406,12 +407,14 @@ class Stage10Tests(unittest.TestCase):
                 finally:
                     self.dispose()
 
-    def test_concurrent_confirmation_and_correction_have_a_valid_serial_outcome(self):
+    def test_concurrent_immediate_payment_and_correction_have_a_valid_serial_outcome(self):
         with TemporaryDirectory() as directory:
             self.file_app(directory)
             try:
                 group_id, record_id, users = self.seed()
-                request_id = self.request_payment(users, '500.00')
+                self.switch_user('1234567890')
+                payment_form = settlement_form_data(self.client, {
+                    'recipient_user_id': users['0123456789'], 'amount': '500.00'})
                 editor = self.app.test_client()
                 editor.post('/login', data={'login_id': '0123456789', 'password': 'secret'})
                 barrier = Barrier(2)
@@ -419,13 +422,20 @@ class Stage10Tests(unittest.TestCase):
 
                 def simultaneous_read(model, identifier, **kwargs):
                     row = original_get(model, identifier, **kwargs)
-                    if model in (ExpenseRecord, SettlementRequest):
+                    if model is ExpenseRecord:
                         barrier.wait(timeout=10)
                     return row
 
-                with patch.object(db, 'get_or_404', side_effect=simultaneous_read):
+                original_parse = routes.parse_settlement_amount
+
+                def simultaneous_parse(value):
+                    amount = original_parse(value)
+                    barrier.wait(timeout=10)
+                    return amount
+
+                with patch.object(db, 'get_or_404', side_effect=simultaneous_read), patch.object(routes, 'parse_settlement_amount', side_effect=simultaneous_parse):
                     with ThreadPoolExecutor(max_workers=2) as executor:
-                        confirm = executor.submit(self.client.post, f'/settlement-requests/{request_id}/confirm')
+                        confirm = executor.submit(self.client.post, '/settlements', data=payment_form)
                         edit = executor.submit(editor.post, f'/groups/{group_id}/expenses/{record_id}/edit', data={
                             'paid_by': users['0123456789'], 'expense_type': 'custom', 'custom_total': '200.00',
                             f"custom_{users['1234567890']}": '200.00'})
@@ -434,7 +444,9 @@ class Stage10Tests(unittest.TestCase):
                 with self.app.app_context():
                     count = ConfirmedSettlement.query.count()
                     self.assertIn(count, (0, 1))
-                    self.assertEqual(db.session.get(SettlementRequest, request_id).status, 'CONFIRMED' if count else 'PENDING')
+                    self.assertEqual(SettlementRequest.query.count(), count)
+                    if count:
+                        self.assertEqual(SettlementRequest.query.one().status, 'CONFIRMED')
                     self.assertEqual(ExpenseRecord.query.one().current_expense.amount, Decimal('200.00'))
                     self.assertEqual(ExpenseRevision.query.count(), 2)
                 self.assert_balances(users, ('-300.00', '300.00', '0.00') if count else ('200.00', '-200.00', '0.00'))

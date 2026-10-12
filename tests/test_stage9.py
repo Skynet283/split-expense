@@ -1,3 +1,4 @@
+from test_factory import settlement_form_data
 import unittest
 
 from extensions import db
@@ -75,39 +76,22 @@ class Stage9Tests(unittest.TestCase):
         self.assertIn(b"by Asha", page.data)
         self.assertIn(b"Corrected dinner", page.data)
 
-    def test_settlement_statuses_and_recipient_actions_are_presentational(self):
-        group_id, _, users = self.seed()
-        self.client.post("/logout")
-        self.login("1234567890")
-        self.client.post("/settlement-requests", data={"recipient_user_id": users["0123456789"], "amount": "200.00"})
-        requester_page = self.client.get("/")
-        self.assertIn(b"Settlement Requests", requester_page.data)
-        self.assertIn(b"Pending", requester_page.data)
-        self.assertIn(b"Awaiting confirmation", requester_page.data)
-        self.assertNotIn(b"Confirm payment", requester_page.data)
-
-        self.client.post("/logout")
-        self.login("0123456789")
-        recipient_page = self.client.get("/")
-        self.assertIn(b"Confirm payment", recipient_page.data)
-        self.assertIn(b"Reject request", recipient_page.data)
-        with self.app.app_context():
-            first_id = SettlementRequest.query.one().id
-        self.client.post(f"/settlement-requests/{first_id}/confirm")
-
-        self.client.post("/logout")
-        self.login("1234567890")
-        self.client.post("/settlement-requests", data={"recipient_user_id": users["0123456789"], "amount": "100.00"})
-        self.client.post("/logout")
-        self.login("0123456789")
-        with self.app.app_context():
-            second_id = SettlementRequest.query.order_by(SettlementRequest.id.desc()).first().id
-        self.client.post(f"/settlement-requests/{second_id}/reject")
-        page = self.client.get("/")
-        self.assertIn(b"Confirmed", page.data)
-        self.assertIn(b"Rejected", page.data)
-        self.assertIn(b"This request is read-only.", page.data)
-        self.assertNotIn(b"Confirm payment", page.data)
+    def test_completed_settlement_history_and_reversal_controls(self):
+        _, _, users = self.seed()
+        self.client.post('/logout')
+        self.login('1234567890')
+        self.client.post('/settlement-requests', data=settlement_form_data(self.client, {
+            'recipient_user_id': users['0123456789'], 'amount': '200.00'}))
+        for login_id in ('1234567890', '0123456789'):
+            self.client.post('/logout')
+            self.login(login_id)
+            page = self.client.get('/').data
+            self.assertIn(b'Settlement History', page)
+            self.assertIn(b'Completed', page)
+            self.assertIn(b'Reverse settlement', page)
+            self.assertNotIn(b'Confirm payment', page)
+            self.assertNotIn(b'Reject request', page)
+            self.assertNotIn(b'Awaiting confirmation', page)
 
 
 if __name__ == "__main__":

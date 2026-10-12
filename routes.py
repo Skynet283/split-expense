@@ -13,15 +13,15 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from extensions import db, login_manager
-from activity import record_expense_created, record_expense_revised
+from activity import record_expense_created, record_expense_revised, settlement_history_entries
 from expense_history import (active_expense_records, append_expense_revision, claim_active_expense_record,
                              create_expense_record, iter_active_expenses, void_expense_record)
 from helpers import (ZERO, compute_balances, compute_global_user_balances, compute_pairwise_user_obligations,
                      compute_settlements, compute_user_balances,
-                     get_user_settlement_summary, parse_settlement_amount, save_splits, save_user_splits, validate_settlement_confirmation,
-                     validate_settlement_request)
+                     get_user_settlement_summary, parse_settlement_amount, save_splits, save_user_splits,
+                     read_settlement_submission_token, settlement_submission_token, validate_settlement_payment)
 from models import (ActivityEvent, ConfirmedSettlement, Expense, ExpenseRecord, Group, GroupMembership, Member,
-                    SettlementRequest, User)
+                    SettlementRequest, SettlementReversal, User)
 
 main = Blueprint("main", __name__)
 logger = logging.getLogger(__name__)
@@ -378,18 +378,13 @@ def admin_reset_password(user_id):
 
 
 def deactivation_blocker(user_id):
-    """Compose the existing ledger, direct-obligation, and request sources."""
+    """Compose current ledger and direct obligations; old requests are inert."""
     balances, _ = compute_global_user_balances()
     if balances.get(user_id, ZERO) != ZERO:
         return "This user has an outstanding global balance. Settle it first."
     obligations, _ = compute_pairwise_user_obligations()
     if any(user_id in pair and amount > ZERO for pair, amount in obligations.items()):
         return "This user has an outstanding direct obligation. Settle it first."
-    pending = SettlementRequest.query.filter_by(status="PENDING").filter(
-        or_(SettlementRequest.requester_user_id == user_id, SettlementRequest.recipient_user_id == user_id)
-    ).first()
-    if pending is not None:
-        return "This user has a pending settlement request. Resolve it first."
     return None
 
 
@@ -442,83 +437,97 @@ def admin_reactivate_user(user_id):
 
 
 @main.post("/settlement-requests")
+@main.post("/settlements")
 @login_required
 def create_settlement_request():
     try:
+        payer_user_id = int(request.form.get("payer_user_id", current_user.id))
         recipient_user_id = int(request.form.get("recipient_user_id", ""))
+        if current_user.id not in (payer_user_id, recipient_user_id):
+            abort(403)
+        payer = db.session.get(User, payer_user_id)
         recipient = db.session.get(User, recipient_user_id)
-        if recipient is None:
-            raise ValueError("Recipient user was not found.")
+        if payer is None or recipient is None:
+            raise ValueError("Settlement user was not found.")
         amount = parse_settlement_amount(request.form.get("amount", ""))
-        # Serialize pending-limit validation and insertion on SQLite. This is
-        # a no-op claim, not a change to the user's identity or permissions.
+        submission_id = read_settlement_submission_token(
+            request.form.get("submission_token", ""), current_user.id, payer.id, recipient.id)
+        # SQLite's writer lock serializes either participant and expense writers.
+        # Validate only after acquiring it, and commit both snapshots together.
         User.query.filter_by(id=current_user.id).update({User.id: User.id}, synchronize_session=False)
-        validate_settlement_request(current_user.id, recipient.id, amount)
-        db.session.add(SettlementRequest(requester_user_id=current_user.id, recipient_user_id=recipient.id,
-                                         amount=amount, status="PENDING"))
+        previous = ConfirmedSettlement.query.filter_by(submission_id=submission_id).first()
+        if previous is not None:
+            if (previous.recorded_by_user_id, previous.payer_user_id, previous.recipient_user_id, previous.amount) != (
+                    current_user.id, payer.id, recipient.id, amount):
+                raise ValueError("This settlement form was already used for a different payment.")
+            db.session.rollback()
+            flash("This settlement was already recorded.", "info")
+            return redirect(url_for("main.index"))
+        validate_settlement_payment(payer.id, recipient.id, amount)
+        recorded_at = datetime.now(timezone.utc)
+        settlement_request = SettlementRequest(requester_user_id=payer.id, recipient_user_id=recipient.id,
+                                               amount=amount, status="CONFIRMED", resolved_at=recorded_at,
+                                               created_at=recorded_at)
+        db.session.add(settlement_request)
+        db.session.flush()
+        db.session.add(ConfirmedSettlement(
+            settlement_request_id=settlement_request.id, payer_user_id=payer.id, recipient_user_id=recipient.id,
+            amount=amount, confirmed_at=recorded_at, recorded_by_user_id=current_user.id, submission_id=submission_id))
         db.session.commit()
-        flash("Settlement request created.", "success")
+        flash("Settlement recorded.", "success")
     except (ValueError, TypeError) as error:
         db.session.rollback()
         flash(str(error), "danger")
     except SQLAlchemyError:
         db.session.rollback()
-        logger.exception("Could not create settlement request")
-        flash("We could not create that settlement request. Please try again.", "danger")
+        logger.exception("Could not record settlement")
+        flash("We could not record that settlement. Please try again.", "danger")
     return redirect(url_for("main.index"))
 
 
-def resolve_settlement_request(request_id, target_status):
+def retired_settlement_request(request_id):
     settlement_request = db.get_or_404(SettlementRequest, request_id)
-    if settlement_request.recipient_user_id != current_user.id:
+    if current_user.id not in (settlement_request.requester_user_id, settlement_request.recipient_user_id):
         abort(403)
-    if settlement_request.status != "PENDING":
-        flash("Only pending settlement requests can be resolved.", "danger")
-        return redirect(url_for("main.index"))
+    flash("The settlement confirmation workflow has retired. This historical request was left unchanged.", "info")
+    return redirect(url_for("main.index"))
+
+
+@main.post("/settlements/<int:settlement_id>/reverse")
+@login_required
+def reverse_settlement(settlement_id):
+    payment = db.get_or_404(ConfirmedSettlement, settlement_id)
+    if current_user.id not in (payment.payer_user_id, payment.recipient_user_id):
+        abort(403)
     try:
-        # A conditional no-op UPDATE claims the pending row before reading the
-        # ledger. On SQLite this also serializes writers, including confirmations
-        # of different requests. Keep the claim and both writes in one transaction.
-        claimed = SettlementRequest.query.filter_by(
-            id=request_id, recipient_user_id=current_user.id, status="PENDING"
-        ).update({SettlementRequest.status: "PENDING"}, synchronize_session=False)
-        if claimed != 1:
-            raise ValueError("Only pending settlement requests can be resolved.")
-        db.session.refresh(settlement_request)
-        resolved_at = datetime.now(timezone.utc)
-        if target_status == "CONFIRMED":
-            validate_settlement_confirmation(settlement_request)
-            db.session.add(ConfirmedSettlement(
-                settlement_request_id=settlement_request.id,
-                payer_user_id=settlement_request.requester_user_id,
-                recipient_user_id=settlement_request.recipient_user_id,
-                amount=settlement_request.amount,
-                confirmed_at=resolved_at,
-            ))
-        settlement_request.status = target_status
-        settlement_request.resolved_at = resolved_at
+        User.query.filter_by(id=current_user.id).update({User.id: User.id}, synchronize_session=False)
+        # Recheck after the writer claim, using a query rather than a cached relationship.
+        if SettlementReversal.query.filter_by(confirmed_settlement_id=payment.id).first() is not None:
+            raise ValueError("This settlement was already reversed.")
+        db.session.add(SettlementReversal(confirmed_settlement_id=payment.id,
+                                         reversed_by_user_id=current_user.id, reversed_at=datetime.now(timezone.utc)))
         db.session.commit()
-        flash(f"Settlement request {target_status.lower()}.", "success")
+        flash("Settlement reversed. Its history has been preserved.", "success")
     except ValueError as error:
         db.session.rollback()
         flash(str(error), "danger")
     except SQLAlchemyError:
         db.session.rollback()
-        logger.exception("Could not resolve settlement request %s", request_id)
-        flash("We could not resolve that settlement request. Please try again.", "danger")
-    return redirect(url_for("main.index"))
+        logger.exception("Could not reverse settlement %s", settlement_id)
+        flash("We could not reverse that settlement. Please try again.", "danger")
+    return redirect(url_for("main.activity_history"))
 
 
 @main.post("/settlement-requests/<int:request_id>/confirm")
 @login_required
 def confirm_settlement_request(request_id):
-    return resolve_settlement_request(request_id, "CONFIRMED")
+    return retired_settlement_request(request_id)
 
 
 @main.post("/settlement-requests/<int:request_id>/reject")
 @login_required
 def reject_settlement_request(request_id):
-    return resolve_settlement_request(request_id, "REJECTED")
+    return retired_settlement_request(request_id)
 
 
 @main.post("/logout")
@@ -539,10 +548,6 @@ def index():
                       .order_by(User.name, User.login_id)
                       .all())
     active_counts = {group.id: len(active_expense_records(group)) for group in groups}
-    settlement_requests = (SettlementRequest.query
-                           .filter(or_(SettlementRequest.requester_user_id == current_user.id,
-                                       SettlementRequest.recipient_user_id == current_user.id))
-                           .order_by(SettlementRequest.created_at.desc(), SettlementRequest.id.desc()).all())
     outgoing_summary, incoming_summary = get_user_settlement_summary(current_user.id)
     partner_ids = {row["user_id"] for row in outgoing_summary + incoming_summary}
     partners = {user.id: user for user in User.query.filter(User.id.in_(partner_ids)).all()} if partner_ids else {}
@@ -550,9 +555,12 @@ def index():
     incoming_obligations = [{**row, "user": partners[row["user_id"]]} for row in incoming_summary]
     outgoing_obligations.sort(key=lambda row: (row["user"].name or row["user"].login_id, row["user"].id))
     incoming_obligations.sort(key=lambda row: (row["user"].name or row["user"].login_id, row["user"].id))
+    for row in outgoing_obligations + incoming_obligations:
+        row["submission_token"] = settlement_submission_token(
+            current_user.id, row["payer_user_id"], row["recipient_user_id"])
     return render_template("index.html", groups=groups, active_counts=active_counts,
                            eligible_users=eligible_users,
-                           settlement_requests=settlement_requests,
+                           settlement_entries=settlement_history_entries(current_user.id),
                            outgoing_obligations=outgoing_obligations,
                            incoming_obligations=incoming_obligations, zero=ZERO)
 
@@ -568,7 +576,10 @@ def activity_history():
               .distinct()
               .order_by(ActivityEvent.created_at.desc(), ActivityEvent.id.desc())
               .all())
-    return render_template("activity.html", events=events)
+    entries = [{"kind": "expense", "created_at": event.created_at, "event": event} for event in events]
+    entries.extend(settlement_history_entries(current_user.id))
+    entries.sort(key=lambda entry: entry["created_at"], reverse=True)
+    return render_template("activity.html", entries=entries)
 
 
 @main.route("/groups", methods=["POST"])

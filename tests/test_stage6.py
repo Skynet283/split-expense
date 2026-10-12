@@ -1,3 +1,4 @@
+from test_factory import settlement_form_data
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
@@ -164,8 +165,8 @@ class Stage6Tests(unittest.TestCase):
         group_id, record_id, users = self.seed()
         self.client.post("/logout")
         self.login("1234567890")
-        self.client.post("/settlement-requests", data={"recipient_user_id": users["0123456789"],
-                                                        "amount": "500.00"})
+        self.client.post("/settlement-requests", data=settlement_form_data(self.client, {"recipient_user_id": users["0123456789"],
+                                                        "amount": "500.00"}))
         with self.app.app_context():
             request_id = SettlementRequest.query.one().id
         self.client.post("/logout")
@@ -187,8 +188,8 @@ class Stage6Tests(unittest.TestCase):
         group_id, record_id, users = self.seed()
         self.client.post("/logout")
         self.login("1234567890")
-        self.client.post("/settlement-requests", data={"recipient_user_id": users["0123456789"],
-                                                        "amount": "500.00"})
+        self.client.post("/settlement-requests", data=settlement_form_data(self.client, {"recipient_user_id": users["0123456789"],
+                                                        "amount": "500.00"}))
         with self.app.app_context():
             request_id = SettlementRequest.query.one().id
         self.client.post("/logout")

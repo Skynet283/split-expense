@@ -1,3 +1,4 @@
+from test_factory import settlement_form_data
 import unittest
 from decimal import Decimal
 
@@ -259,12 +260,11 @@ class Stage14Tests(unittest.TestCase):
             self.assertTrue(db.session.get(User, debtor_id).is_active)
         self.post("/admin/logout", token_path="/admin")
         self.login("1234567890")
-        self.post("/settlement-requests", {"recipient_user_id": self.ids["0123456789"],
-                                             "amount": "10.00"})
+        self.post("/settlement-requests", settlement_form_data(self.client, {"recipient_user_id": self.ids["0123456789"],
+                                             "amount": "10.00"}))
         with self.app.app_context():
             request_id = SettlementRequest.query.one().id
-            self.assertEqual(compute_pairwise_user_obligations()[0][
-                (debtor_id, self.ids["0123456789"])], Decimal("10.00"))
+            self.assertEqual(compute_pairwise_user_obligations()[0], {})
         self.logout()
         self.login()
         self.post(f"/settlement-requests/{request_id}/confirm")

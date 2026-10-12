@@ -1,0 +1,46 @@
+{% macro settlement_entry(entry) %}
+<div class="list-group-item p-3">
+  <div class="d-flex flex-wrap justify-content-between gap-2">
+    <div>
+      {% if entry.kind == 'legacy_request' %}
+        {% set historical = entry.request %}
+        <strong>{{ historical.requester.name or historical.requester.login_id }}</strong> →
+        <strong>{{ historical.recipient.name or historical.recipient.login_id }}</strong>
+        · ₹{{ "%.2f"|format(historical.amount) }}
+        {% if historical.status == 'PENDING' %}
+          <span class="badge bg-secondary">Obsolete request</span>
+          <div class="small text-muted">Historical proposal. No payment was recorded; it reserves no amount.</div>
+        {% elif historical.status == 'REJECTED' %}
+          <span class="badge bg-secondary">Rejected request</span>
+          <div class="small text-muted">Historical request with no accounting effect.</div>
+        {% else %}
+          <span class="badge bg-secondary">Historical confirmed request</span>
+          <div class="small text-muted">No payment snapshot exists. This request has no accounting effect.</div>
+        {% endif %}
+      {% else %}
+        {% set payment = entry.payment %}
+        {% if entry.kind == 'reversal' %}
+          <strong>{{ payment.reversal.reversed_by_user.name or payment.reversal.reversed_by_user.login_id }}</strong>
+          reversed settlement #{{ payment.id }}:
+        {% endif %}
+        <strong>{{ payment.payer.name or payment.payer.login_id }}</strong> paid
+        <strong>{{ payment.recipient.name or payment.recipient.login_id }}</strong>
+        <strong>₹{{ "%.2f"|format(payment.amount) }}</strong>
+        <span class="badge {{ 'bg-secondary' if payment.reversal else 'bg-success' }}">{{ 'Reversed' if payment.reversal else 'Completed' }}</span>
+        {% if entry.kind == 'payment' %}
+          <div class="small text-muted">Settlement #{{ payment.id }} · Recorded{% if payment.recorded_by_user %} by {{ payment.recorded_by_user.name or payment.recorded_by_user.login_id }}{% else %} before recorder tracking{% endif %}</div>
+          {% if payment.reversal %}
+            <div class="small text-muted">Reversed by {{ payment.reversal.reversed_by_user.name or payment.reversal.reversed_by_user.login_id }} on {{ payment.reversal.reversed_at.strftime('%d %b %Y, %I:%M %p') }} UTC.</div>
+          {% else %}
+            <form method="POST" action="{{ url_for('main.reverse_settlement', settlement_id=payment.id) }}" class="mt-2">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <button class="btn btn-sm btn-outline-danger" type="submit">Reverse settlement</button>
+            </form>
+          {% endif %}
+        {% endif %}
+      {% endif %}
+    </div>
+    <small class="text-muted">{{ entry.created_at.strftime('%d %b %Y, %I:%M %p') }} UTC</small>
+  </div>
+</div>
+{% endmacro %}

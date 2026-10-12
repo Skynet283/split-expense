@@ -1,3 +1,4 @@
+from test_factory import settlement_form_data
 import re
 import unittest
 
@@ -83,7 +84,7 @@ class CsrfReleaseHardeningTests(unittest.TestCase):
         self.client.post("/logout", data={"csrf_token": self.token("/")})
         pages = [self.client.get("/login")]
         self.login("1234567890")
-        request = self.post("/settlement-requests", {"recipient_user_id": users["0123456789"], "amount": "10.00"}, token_path="/")
+        request = self.post("/settlement-requests", settlement_form_data(self.client, {"recipient_user_id": users["0123456789"], "amount": "10.00"}), token_path="/")
         self.assertEqual(request.status_code, 302)
         self.client.post("/logout", data={"csrf_token": self.token("/")})
         self.login("0123456789")

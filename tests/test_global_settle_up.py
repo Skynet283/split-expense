@@ -1,3 +1,4 @@
+from test_factory import settlement_form_data
 import re
 import unittest
 from datetime import datetime, timezone
@@ -83,7 +84,7 @@ class GlobalSettleUpTests(unittest.TestCase):
         return re.search(r'<section id="global-settle-up".*?</section>', page, re.S).group(0)
 
     def create_request(self, recipient_id, amount):
-        return self.post("/settlement-requests", {"recipient_user_id": recipient_id, "amount": amount}, token_path="/")
+        return self.post("/settlement-requests", settlement_form_data(self.client, {"recipient_user_id": recipient_id, "amount": amount}), token_path="/")
 
     def pairwise(self):
         with self.app.app_context():
@@ -134,59 +135,53 @@ class GlobalSettleUpTests(unittest.TestCase):
             self.assertEqual(ConfirmedSettlement.query.count(), 1)
             self.assertEqual(compute_pairwise_user_obligations()[0], {})
 
-    def test_pending_outgoing_and_incoming_requests_are_displayed(self):
+    def test_completed_payment_is_shown_to_both_participants(self):
         users = self.add_users()
-        self.add_obligation(users, "Asha", "Bala", "100.00", "Trip")
-        self.login("0123456789")
-        self.create_request(users["Bala"], "30.00")
-        self.assertIn("Pending outgoing: ₹30.00", self.section())
-        self.assertIn("Pending", self.client.get("/").get_data(as_text=True))
-        self.logout()
-        self.login("1234567890")
-        self.assertIn("Pending incoming: ₹30.00", self.section())
+        self.add_obligation(users, 'Asha', 'Bala', '100.00', 'Trip')
+        self.login('0123456789')
+        self.create_request(users['Bala'], '30.00')
+        for login_id in ('0123456789', '1234567890'):
+            self.logout()
+            self.login(login_id)
+            self.assertIn('Completed', self.client.get('/').get_data(as_text=True))
+            self.assertIn('70.00', self.section())
+            self.assertNotIn('Awaiting confirmation', self.section())
 
-    def test_full_pending_request_hides_settle_form_and_explains_pending_state(self):
+    def test_full_payment_removes_outstanding_form(self):
         users = self.add_users()
-        self.add_obligation(users, "Asha", "Bala", "10.00", "Trip")
-        self.login("0123456789")
-        self.create_request(users["Bala"], "10.00")
-        section = self.section()
-        self.assertIn("Awaiting confirmation from Bala.", section)
-        self.assertIn("Settlement pending. No further action is required", section)
-        self.assertNotIn("settlement-request-form", section)
+        self.add_obligation(users, 'Asha', 'Bala', '10.00', 'Trip')
+        self.login('0123456789')
+        self.create_request(users['Bala'], '10.00')
+        self.assertNotIn('settlement-form', self.section())
+        self.assertNotIn('Awaiting confirmation', self.section())
+        self.assertEqual(self.pairwise(), {})
 
-    def test_partial_pending_request_limits_default_and_backend_submission_to_available_amount(self):
+    def test_partial_payment_limits_form_and_backend_to_remaining_obligation(self):
         users = self.add_users()
-        self.add_obligation(users, "Asha", "Bala", "100.00", "Trip")
-        self.login("0123456789")
-        self.create_request(users["Bala"], "40.00")
-        section = self.section()
-        self.assertIn("60.00 still available to settle.", section)
-        self.assertRegex(section, r'max="60\.00" value="60\.00"')
-        self.create_request(users["Bala"], "60.01")
+        self.add_obligation(users, 'Asha', 'Bala', '100.00', 'Trip')
+        self.login('0123456789')
+        self.create_request(users['Bala'], '40.00')
+        self.assertRegex(self.section(), r'max="60\.00" value="60\.00"')
+        self.create_request(users['Bala'], '60.01')
         with self.app.app_context():
-            self.assertEqual(SettlementRequest.query.filter_by(status="PENDING").count(), 1)
+            self.assertEqual(ConfirmedSettlement.query.count(), 1)
 
-    def test_multiple_pending_requests_sum_and_rejection_releases_reserved_amount(self):
+    def test_partial_payments_and_reversal_restore_available_amount(self):
         users = self.add_users()
-        self.add_obligation(users, "Asha", "Bala", "100.00", "Trip")
-        self.login("0123456789")
-        self.create_request(users["Bala"], "40.00")
-        self.create_request(users["Bala"], "30.00")
+        self.add_obligation(users, 'Asha', 'Bala', '100.00', 'Trip')
+        self.login('0123456789')
+        self.create_request(users['Bala'], '40.00')
+        self.create_request(users['Bala'], '30.00')
         with self.app.app_context():
-            outgoing, _ = get_user_settlement_summary(users["Asha"])
-            self.assertEqual(outgoing[0]["pending_amount"], Decimal("70.00"))
-            self.assertEqual(outgoing[0]["available_amount"], Decimal("30.00"))
-            request_id = SettlementRequest.query.order_by(SettlementRequest.id).first().id
+            outgoing, _ = get_user_settlement_summary(users['Asha'])
+            self.assertEqual(outgoing[0]['available_amount'], Decimal('30.00'))
+            identifier = ConfirmedSettlement.query.order_by(ConfirmedSettlement.id).first().id
         self.logout()
-        self.login("1234567890")
-        self.post(f"/settlement-requests/{request_id}/reject", token_path="/")
-        self.logout()
-        self.login("0123456789")
+        self.login('1234567890')
+        self.post(f'/settlements/{identifier}/reverse', token_path='/')
         with self.app.app_context():
-            outgoing, _ = get_user_settlement_summary(users["Asha"])
-            self.assertEqual(outgoing[0]["pending_amount"], Decimal("30.00"))
-            self.assertEqual(outgoing[0]["available_amount"], Decimal("70.00"))
+            outgoing, _ = get_user_settlement_summary(users['Asha'])
+            self.assertEqual(outgoing[0]['available_amount'], Decimal('70.00'))
 
     def test_confirmed_settlement_automatically_reduces_displayed_obligation(self):
         users = self.add_users()
@@ -224,7 +219,7 @@ class GlobalSettleUpTests(unittest.TestCase):
         section = self.section()
         self.assertEqual(self.global_balances()[users["Asha"]], Decimal("0.00"))
         self.assertIn(f'value="{users["Bala"]}"', section)
-        self.assertNotIn(f'value="{users["Chitra"]}"', section)
+        self.assertIn(f'name="payer_user_id" value="{users["Chitra"]}"', section)
         self.assertIn("Chitra", section)
         self.assertEqual(self.pairwise(), {
             (users["Asha"], users["Bala"]): Decimal("50.00"),
@@ -235,8 +230,8 @@ class GlobalSettleUpTests(unittest.TestCase):
         users = self.add_users()
         self.add_obligation(users, "Asha", "Bala", "100.00", "Trip")
         self.login("0123456789")
-        response = self.client.post("/settlement-requests", data={
-            "recipient_user_id": users["Bala"], "amount": "30.00"})
+        response = self.client.post("/settlement-requests", data=settlement_form_data(self.client, {
+            "recipient_user_id": users["Bala"], "amount": "30.00"}))
         self.assertEqual(response.status_code, 400)
         with self.app.app_context():
             self.assertEqual(SettlementRequest.query.count(), 0)

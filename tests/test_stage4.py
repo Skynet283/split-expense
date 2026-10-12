@@ -1,3 +1,4 @@
+from test_factory import settlement_form_data
 import unittest
 from decimal import Decimal
 
@@ -82,113 +83,74 @@ class Stage4Tests(unittest.TestCase):
             return asha.id, bala.id, expense.id
 
     def create_request(self, recipient_user_id, amount):
-        return self.client.post("/settlement-requests", data={"recipient_user_id": str(recipient_user_id), "amount": amount},
+        return self.client.post("/settlement-requests", data=settlement_form_data(self.client, {"recipient_user_id": str(recipient_user_id), "amount": amount}),
                                 follow_redirects=True)
 
-    def test_valid_pending_request_and_money_validation_do_not_change_balances(self):
+    def test_immediate_payment_and_money_validation(self):
         asha_id, bala_id, _ = self.seed_a_owes_b()
-        self.login("0123456789")
+        self.login('0123456789')
+        self.assertIn(b'Settlement recorded', self.create_request(bala_id, '300.00').data)
         with self.app.app_context():
-            before, _ = compute_global_user_balances()
-        response = self.create_request(bala_id, "300.00")
-        self.assertIn(b"Settlement request created", response.data)
-        with self.app.app_context():
-            settlement = SettlementRequest.query.one()
-            after, _ = compute_global_user_balances()
-            self.assertEqual(settlement.status, "PENDING")
-            self.assertEqual(settlement.amount, Decimal("300.00"))
-            self.assertEqual(dict(after), dict(before))
-            self.assertEqual(before[asha_id], Decimal("-500.00"))
-            self.assertEqual(before[bala_id], Decimal("500.00"))
-
-        for invalid_amount in ("0", "-1", "1.001", "bad"):
-            self.create_request(bala_id, invalid_amount)
-        response = self.create_request(asha_id, "1.00")
-        self.assertIn(b"yourself", response.data)
-        response = self.create_request(999999, "1.00")
-        self.assertIn(b"not found", response.data)
+            self.assertEqual(SettlementRequest.query.one().status, 'CONFIRMED')
+            balances, _ = compute_global_user_balances()
+            self.assertEqual(balances[asha_id], Decimal('-200.00'))
+            self.assertEqual(balances[bala_id], Decimal('200.00'))
+        for value in ('0', '-1', '1.001', 'bad'):
+            self.create_request(bala_id, value)
+        self.assertIn(b'yourself', self.create_request(asha_id, '1.00').data)
+        self.assertIn(b'not found', self.create_request(999999, '1.00').data)
         with self.app.app_context():
             self.assertEqual(SettlementRequest.query.count(), 1)
 
-    def test_pairwise_validation_pending_limit_and_no_false_pairwise_relationship(self):
+    def test_pairwise_validation_and_no_false_partner(self):
         with self.app.app_context():
-            asha = self.add_user("Asha", "0123456789")
-            bala = self.add_user("Bala", "1234567890")
-            chitra = self.add_user("Chitra", "2345678901")
-            self.add_group_with_expense(bala, [asha, chitra], "500.00", ["300.00", "200.00"])
+            asha = self.add_user('Asha', '0123456789')
+            bala = self.add_user('Bala', '1234567890')
+            chitra = self.add_user('Chitra', '2345678901')
+            self.add_group_with_expense(bala, [asha, chitra], '500.00', ['300.00', '200.00'])
             db.session.commit()
             asha_id, bala_id, chitra_id = asha.id, bala.id, chitra.id
-            obligations, unresolved = compute_pairwise_user_obligations()
-            self.assertEqual(obligations[(asha_id, bala_id)], Decimal("300.00"))
-            self.assertEqual(obligations[(chitra_id, bala_id)], Decimal("200.00"))
-            self.assertEqual(unresolved, [])
-
-        self.login("0123456789")
-        self.create_request(bala_id, "200.00")
-        self.create_request(bala_id, "100.00")
-        self.create_request(bala_id, "0.01")
-        response = self.create_request(chitra_id, "1.00")
-        self.assertIn(b"No valid outstanding obligation", response.data)
+            self.assertEqual(compute_pairwise_user_obligations()[0], {
+                (asha_id, bala_id): Decimal('300.00'), (chitra_id, bala_id): Decimal('200.00')})
+        self.login('0123456789')
+        self.create_request(bala_id, '200.00')
+        self.create_request(bala_id, '100.00')
+        self.create_request(bala_id, '0.01')
+        self.assertIn(b'No valid outstanding obligation', self.create_request(chitra_id, '1.00').data)
         with self.app.app_context():
-            self.assertEqual(SettlementRequest.query.filter_by(status="PENDING").count(), 2)
+            self.assertEqual(SettlementRequest.query.filter_by(status='CONFIRMED').count(), 2)
+            self.assertEqual(compute_pairwise_user_obligations()[0], {(chitra_id, bala_id): Decimal('200.00')})
 
-    def test_only_recipient_can_resolve_and_confirmed_payment_affects_balances(self):
+    def test_retired_workflow_leaves_completed_payment_unchanged(self):
         asha_id, bala_id, _ = self.seed_a_owes_b()
         with self.app.app_context():
-            chitra = self.add_user("Chitra", "2345678901")
+            self.add_user('Chitra', '2345678901')
             db.session.commit()
-            chitra_id = chitra.id
-        self.login("0123456789")
-        self.create_request(bala_id, "100.00")
+        self.login('0123456789')
+        self.create_request(bala_id, '100.00')
         with self.app.app_context():
-            request_id = SettlementRequest.query.one().id
-            before, _ = compute_global_user_balances()
+            identifier = SettlementRequest.query.one().id
+        for login_id in ('0123456789', '1234567890'):
+            self.client.post('/logout')
+            self.login(login_id)
+            for action in ('confirm', 'reject'):
+                self.assertEqual(self.client.post(f'/settlement-requests/{identifier}/{action}').status_code, 302)
+        self.client.post('/logout')
+        self.login('2345678901')
+        self.assertEqual(self.client.post(f'/settlement-requests/{identifier}/confirm').status_code, 403)
+        with self.app.app_context():
+            self.assertEqual(SettlementRequest.query.one().status, 'CONFIRMED')
+            self.assertEqual(compute_pairwise_user_obligations()[0], {(asha_id, bala_id): Decimal('400.00')})
 
-        self.assertEqual(self.client.post(f"/settlement-requests/{request_id}/confirm").status_code, 403)
-        self.client.post("/logout")
-        self.login("2345678901")
-        self.assertEqual(self.client.post(f"/settlement-requests/{request_id}/reject").status_code, 403)
-        self.client.post("/logout")
-        self.login("1234567890")
-        self.client.post(f"/settlement-requests/{request_id}/confirm", follow_redirects=True)
-        with self.app.app_context():
-            request = db.session.get(SettlementRequest, request_id)
-            after, _ = compute_global_user_balances()
-            self.assertEqual(request.status, "CONFIRMED")
-            self.assertIsNotNone(request.resolved_at)
-            self.assertEqual(after[asha_id], before[asha_id] + Decimal("100.00"))
-            self.assertEqual(after[bala_id], before[bala_id] - Decimal("100.00"))
-        self.client.post(f"/settlement-requests/{request_id}/confirm", follow_redirects=True)
-        self.client.post(f"/settlement-requests/{request_id}/reject", follow_redirects=True)
-        with self.app.app_context():
-            self.assertEqual(db.session.get(SettlementRequest, request_id).status, "CONFIRMED")
-        self.assertEqual(asha_id != chitra_id, True)
-
-    def test_rejection_and_stale_confirmation_are_safe(self):
+    def test_stale_submission_is_rejected_after_expense_revision(self):
         asha_id, bala_id, expense_id = self.seed_a_owes_b()
-        self.login("0123456789")
-        self.create_request(bala_id, "500.00")
+        self.login('0123456789')
         with self.app.app_context():
-            request_id = SettlementRequest.query.one().id
-            self.revise_debt(expense_id, "200.00")
-
-        self.client.post("/logout")
-        self.login("1234567890")
-        response = self.client.post(f"/settlement-requests/{request_id}/confirm", follow_redirects=True)
-        self.assertIn(b"stale", response.data)
+            self.revise_debt(expense_id, '200.00')
+        self.assertIn(b'exceeds the current outstanding obligation', self.create_request(bala_id, '500.00').data)
         with self.app.app_context():
-            self.assertEqual(db.session.get(SettlementRequest, request_id).status, "PENDING")
-            self.assertEqual(compute_global_user_balances()[0][asha_id], Decimal("-200.00"))
-
-        self.client.post(f"/settlement-requests/{request_id}/reject", follow_redirects=True)
-        with self.app.app_context():
-            request = db.session.get(SettlementRequest, request_id)
-            self.assertEqual(request.status, "REJECTED")
-            self.assertEqual(compute_global_user_balances()[0][bala_id], Decimal("200.00"))
-        self.client.post(f"/settlement-requests/{request_id}/confirm", follow_redirects=True)
-        self.client.post(f"/settlement-requests/{request_id}/reject", follow_redirects=True)
-        with self.app.app_context():
-            self.assertEqual(db.session.get(SettlementRequest, request_id).status, "REJECTED")
+            self.assertEqual(SettlementRequest.query.count(), 0)
+            self.assertEqual(compute_pairwise_user_obligations()[0], {(asha_id, bala_id): Decimal('200.00')})
 
 
 if __name__ == "__main__":

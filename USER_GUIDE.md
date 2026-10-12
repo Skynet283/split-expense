@@ -41,7 +41,7 @@ Select **History** beside an expense to see its versions, amounts, payer, shares
 
 ## 7. Global Activity History
 
-Select **Activity** in the top navigation to see expense additions and revisions across all groups **you are authorized to access**, including activity in archived groups. Entries link to the group and expense history. “Global” does **not** mean you can see every group's transactions. This feed currently does not list settlement, admin-management, or expense-void events.
+Select **Activity** in the top navigation to see expense additions and revisions across all groups **you are authorized to access**, including activity in archived groups. Expense entries link to the group and expense history. Your completed settlements and their reversals also appear here, visible only to the payer and recipient. Payment entries show the amount, timestamp, and recorder where known. This feed does not list admin-management or expense-void events.
 
 ## 8. Balances
 
@@ -49,9 +49,13 @@ Each group shows **Group Expense Balances**. Its **Suggested Expense Payments** 
 
 ## 9. Global Settle Up
 
-On **Groups**, the **You owe** and **Owed to you** columns show direct amounts between you and other users. To propose a payment, choose **Settle** on an available **You owe** entry; you can adjust the amount within the available limit. The request appears under **Settlement Requests** as **Pending**.
+On **Groups**, the **You owe** and **Owed to you** columns show direct amounts between you and other users. Enter the amount actually paid or received and choose **Settle** on either side. Partial and full payments take effect immediately, with no confirmation required. The amount must be positive and cannot exceed the current direct obligation.
 
-A pending request reserves that amount against further requests for the same direct obligation, but **it is not a completed payment** and does not reduce the ledger balance. The recipient can **Confirm payment** or **Reject request**. Confirmation records the payment and reduces the relevant outstanding obligation; the confirmed payment is preserved as an immutable historical record. Rejection releases the reserved amount without recording a payment. If the underlying obligation changes, a stale request may fail confirmation rather than create an invalid payment.
+When recording money received, the payment still runs from the person who owes you to you. For example, if someone owes you ₹144 and you record ₹50 received, they now owe ₹94. Completed payments appear in **Settlement History** and **Activity**.
+
+Either participant can select **Reverse settlement** from its history entry. Reversal preserves the payment and adds a dated audit record, removes its accounting effect, and restores the corresponding obligation without changing expenses. A payment can be reversed only once. If expenses have since changed, the restored balance reflects those current expenses.
+
+Historical pending requests are shown as **Obsolete request**. They reserve no money, do not block settlements or deactivation, and cannot be confirmed or rejected. Rejected requests remain historical. Old confirmed requests without a payment snapshot retain zero accounting effect; they are never converted automatically.
 
 ## 10. Archived Groups
 
@@ -103,9 +107,8 @@ Use **Deactivate** in the user's row when access should be frozen without deleti
 
 1. The user's global net balance is zero.
 2. No direct outstanding obligation involves the user, as debtor **or** creditor.
-3. No pending settlement request involves the user.
 
-Zero net balance alone is not enough: someone may owe one person ₹100 while another person owes them ₹100. The outstanding relationships and pending requests must also be resolved first. If a condition fails, the user stays active and the page shows why.
+Zero net balance alone is not enough: someone may owe one person ₹100 while another person owes them ₹100. The outstanding direct relationships must also be settled first. Obsolete pending requests do not block deactivation. If a condition fails, the user stays active and the page shows why.
 
 A deactivated user cannot sign in or be selected for a new group or new expense. Existing group memberships, expenses, revisions, settlements, activity, and accounting history remain intact. Expenses already involving that user are viewable but cannot be revised while they are inactive. Deactivation never deletes the user or automatically settles anything. Legacy name-only expenses are not linked to a User by guessing an identity.
 
@@ -128,8 +131,8 @@ User Management does not reveal plaintext passwords, delete users, or grant arbi
 | Edit an expense | Its creator, while the group is active and no current participant is deactivated |
 | View group expense history | Group owner or member |
 | View relevant global activity | Signed-in user, for groups they can access |
-| Request a settlement | Signed-in user with a valid direct amount owed and room beyond pending requests |
-| Confirm or reject a pending settlement | Its recipient |
+| Record a payment paid or received | Either signed-in participant, within the current direct obligation |
+| Reverse a completed settlement | Either signed-in participant, once per settlement |
 | Archive a group or void its active expense | Group owner |
 | Deactivate or reactivate a user | Administrator only |
 
@@ -139,6 +142,6 @@ User Management does not reveal plaintext passwords, delete users, or grant arbi
 - **Someone is missing from the group picker?** They may be deactivated, or they may be the current user (who is added automatically). Ask the administrator to check their status.
 - **Someone is missing from a new-expense form?** Only active members of that group can be payer or participant. Reactivation restores eligibility without removing history.
 - **Cannot edit an expense?** Only its creator can revise it. Voided expenses, archived groups, and expenses involving a currently deactivated participant cannot be revised.
-- **Cannot deactivate a user?** Resolve their global balance, all direct obligations, and all pending settlement requests first.
-- **A settlement is still pending?** The recipient has not confirmed or rejected it. Pending amounts reserve availability but are not completed payments.
+- **Cannot deactivate a user?** Resolve their global balance and all direct obligations first. Old pending requests are ignored.
+- **An old request is marked obsolete?** It never recorded a payment. Record any actual payment using Global Settle Up; the historical request stays preserved.
 - **Admin sign-in fails?** Confirm that `.env` in the project root contains `ADMIN_USERNAME` and `ADMIN_PASSWORD`, then restart the app. Existing process environment values take precedence over `.env`. Sign in at `/admin/login` using those credentials.

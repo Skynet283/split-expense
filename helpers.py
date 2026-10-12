@@ -1,12 +1,39 @@
 from collections import defaultdict
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from uuid import uuid4
+
+from flask import current_app
+from itsdangerous import BadSignature, URLSafeSerializer
 
 from extensions import db
 from expense_history import iter_active_expenses
-from models import ConfirmedSettlement, ExpenseSplit, SettlementRequest
+from models import ConfirmedSettlement, ExpenseSplit
 
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
+
+
+def active_settlements():
+    """Canonical payment source shared by both global accounting paths."""
+    return ConfirmedSettlement.query.filter(~ConfirmedSettlement.reversal.has()).all()
+
+
+def settlement_submission_token(actor_id, payer_id, recipient_id):
+    return URLSafeSerializer(current_app.secret_key, salt="settlement-submission").dumps({
+        "id": str(uuid4()), "actor": actor_id, "payer": payer_id, "recipient": recipient_id,
+    })
+
+
+def read_settlement_submission_token(token, actor_id, payer_id, recipient_id):
+    try:
+        payload = URLSafeSerializer(current_app.secret_key, salt="settlement-submission").loads(token)
+    except (BadSignature, TypeError):
+        raise ValueError("Invalid settlement form. Reload the dashboard and try again.") from None
+    if (not isinstance(payload, dict) or payload.get("actor") != actor_id
+            or payload.get("payer") != payer_id or payload.get("recipient") != recipient_id
+            or not isinstance(payload.get("id"), str) or len(payload["id"]) != 36):
+        raise ValueError("Invalid settlement form. Reload the dashboard and try again.")
+    return payload["id"]
 
 
 def create_expense_split(expense_id, member_id, amount_owed):
@@ -104,7 +131,7 @@ def compute_global_user_balances():
         balances[expense.paid_by_user_id] += amount
         for split in splits:
             balances[split.user_id] -= Decimal(str(split.amount_owed)).quantize(CENT, rounding=ROUND_HALF_UP)
-    for payment in ConfirmedSettlement.query.all():
+    for payment in active_settlements():
         amount = Decimal(str(payment.amount)).quantize(CENT)
         balances[payment.payer_user_id] += amount
         balances[payment.recipient_user_id] -= amount
@@ -142,7 +169,7 @@ def compute_pairwise_user_obligations():
 
     # Subtract before reciprocal netting. Negative amounts represent a credit,
     # including when the original expense has subsequently changed/disappeared.
-    for payment in ConfirmedSettlement.query.all():
+    for payment in active_settlements():
         raw_obligations[(payment.payer_user_id, payment.recipient_user_id)] -= Decimal(str(payment.amount)).quantize(CENT)
 
     obligations = {}
@@ -179,70 +206,35 @@ def parse_settlement_amount(value):
     return amount.quantize(CENT)
 
 
-def pending_settlement_amount(requester_user_id, recipient_user_id):
-    pending = SettlementRequest.query.filter_by(
-        requester_user_id=requester_user_id, recipient_user_id=recipient_user_id, status="PENDING"
-    ).all()
-    return sum((Decimal(str(request.amount)).quantize(CENT) for request in pending), ZERO)
-
-
 def get_user_settlement_summary(user_id):
-    """Prepare direct-obligation settlement rows for one dashboard user.
-
-    Confirmed payments are already represented by
-    ``compute_pairwise_user_obligations``. This view model reserves only
-    pending outgoing requests, so it never changes ledger accounting.
-    """
+    """Prepare current direct obligations; obsolete requests reserve nothing."""
     obligations, _ = compute_pairwise_user_obligations()
-    pending_by_pair = defaultdict(lambda: ZERO)
-    pending_requests = SettlementRequest.query.filter_by(status="PENDING").filter(
-        (SettlementRequest.requester_user_id == user_id)
-        | (SettlementRequest.recipient_user_id == user_id)
-    )
-    for request in pending_requests:
-        pair = (request.requester_user_id, request.recipient_user_id)
-        pending_by_pair[pair] += Decimal(str(request.amount)).quantize(CENT)
-
     outgoing, incoming = [], []
     for (debtor_id, creditor_id), outstanding in obligations.items():
-        if debtor_id == user_id:
-            pending = pending_by_pair[(debtor_id, creditor_id)]
-            outgoing.append({
-                "user_id": creditor_id,
+        if user_id in (debtor_id, creditor_id):
+            row = {
+                "user_id": creditor_id if debtor_id == user_id else debtor_id,
+                "payer_user_id": debtor_id,
+                "recipient_user_id": creditor_id,
                 "amount": outstanding,
                 "outstanding_amount": outstanding,
-                "pending_amount": pending,
-                "available_amount": max(ZERO, outstanding - pending),
-            })
-        elif creditor_id == user_id:
-            incoming.append({
-                "user_id": debtor_id,
-                "amount": outstanding,
-                "outstanding_amount": outstanding,
-                "pending_amount": pending_by_pair[(debtor_id, creditor_id)],
-            })
+                "available_amount": outstanding,
+            }
+            (outgoing if debtor_id == user_id else incoming).append(row)
     return outgoing, incoming
 
 
-def validate_settlement_request(requester_user_id, recipient_user_id, amount):
-    """Validate a proposed request against direct mapped financial obligations."""
-    if requester_user_id == recipient_user_id:
-        raise ValueError("You cannot create a settlement request to yourself.")
+def validate_settlement_payment(payer_user_id, recipient_user_id, amount):
+    """Validate after the SQLite writer claim, against the current direct pair."""
+    if payer_user_id == recipient_user_id:
+        raise ValueError("You cannot record a settlement to yourself.")
     obligations, _ = compute_pairwise_user_obligations()
-    outstanding = obligations.get((requester_user_id, recipient_user_id), ZERO)
+    outstanding = obligations.get((payer_user_id, recipient_user_id), ZERO)
     if outstanding <= ZERO:
-        raise ValueError("No valid outstanding obligation exists for this settlement request.")
-    if pending_settlement_amount(requester_user_id, recipient_user_id) + amount > outstanding:
-        raise ValueError("Pending settlement requests exceed the valid outstanding obligation.")
+        raise ValueError("No valid outstanding obligation exists for this settlement.")
+    if amount > outstanding:
+        raise ValueError("Settlement amount exceeds the current outstanding obligation.")
     return outstanding
-
-
-def validate_settlement_confirmation(request):
-    """Reject stale pending requests without changing their workflow state."""
-    obligations, _ = compute_pairwise_user_obligations()
-    outstanding = obligations.get((request.requester_user_id, request.recipient_user_id), ZERO)
-    if parse_settlement_amount(request.amount) > outstanding:
-        raise ValueError("This settlement request is stale and exceeds the current outstanding obligation.")
 
 
 def compute_settlements(balances):

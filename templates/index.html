@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from '_settlement_history.html' import settlement_entry with context %}
 {% block content %}
 <div class="row justify-content-center">
   <div class="col-lg-7">
@@ -73,79 +74,43 @@
     <section id="global-settle-up" class="card mt-4">
       <div class="card-header bg-success text-white"><i class="bi bi-globe2 me-1"></i>Global Settle Up</div>
       <div class="card-body">
-        <p class="text-muted small">Direct obligations across all groups, including archived groups.</p>
+        <p class="text-muted small">Direct obligations across all groups, including archived groups. Either party can record a payment; it takes effect immediately.</p>
         <div class="row g-3">
+          {% for title, obligations, direction in [('You owe', outgoing_obligations, 'outgoing'), ('Owed to you', incoming_obligations, 'incoming')] %}
           <div class="col-md-6">
-            <h3 class="h6 text-danger">You owe</h3>
-            {% if outgoing_obligations %}
-              {% for obligation in outgoing_obligations %}
-              <div class="border rounded p-3 mb-2">
-                <div class="d-flex justify-content-between gap-2"><strong>{{ obligation.user.name or obligation.user.login_id }}</strong><strong>₹{{ "%.2f"|format(obligation.amount) }}</strong></div>
-                {% if obligation.pending_amount %}<small class="text-muted d-block mb-2">Pending outgoing: ₹{{ "%.2f"|format(obligation.pending_amount) }}</small>{% endif %}
-                <small class="text-muted d-block">Total outstanding shown above.</small>
-                {% if obligation.pending_amount %}<small class="text-muted d-block">Awaiting confirmation from {{ obligation.user.name or obligation.user.login_id }}.</small>{% endif %}
-                {% if obligation.available_amount > zero %}
-                <small class="text-muted d-block mb-2">₹{{ "%.2f"|format(obligation.available_amount) }} still available to settle.</small>
-                <form method="POST" action="{{ url_for('main.create_settlement_request') }}" class="settlement-request-form d-flex gap-2 align-items-end">
-                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-                  <input type="hidden" name="recipient_user_id" value="{{ obligation.user.id }}" />
-                  <div class="flex-grow-1"><label for="settle_{{ obligation.user.id }}" class="form-label small mb-1">Amount</label><input id="settle_{{ obligation.user.id }}" name="amount" type="number" class="form-control form-control-sm" min="0.01" max="{{ "%.2f"|format(obligation.available_amount) }}" value="{{ "%.2f"|format(obligation.available_amount) }}" step="0.01" required /></div>
-                  <button class="btn btn-sm btn-success">Settle</button>
-                </form>
-                {% else %}
-                <small class="text-muted d-block mb-2">Settlement pending. No further action is required until {{ obligation.user.name or obligation.user.login_id }} confirms or rejects it.</small>
-                {% endif %}
-              </div>
-              {% endfor %}
+            <h3 class="h6 {{ 'text-danger' if direction == 'outgoing' else 'text-success' }}">{{ title }}</h3>
+            {% for obligation in obligations %}
+            <div class="border rounded p-3 mb-2">
+              <div class="d-flex justify-content-between gap-2"><strong>{{ obligation.user.name or obligation.user.login_id }}</strong><strong>₹{{ "%.2f"|format(obligation.amount) }}</strong></div>
+              <form method="POST" action="{{ url_for('main.create_settlement_request') }}" class="settlement-form d-flex gap-2 align-items-end mt-2">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                <input type="hidden" name="submission_token" value="{{ obligation.submission_token }}" />
+                <input type="hidden" name="payer_user_id" value="{{ obligation.payer_user_id }}" />
+                <input type="hidden" name="recipient_user_id" value="{{ obligation.recipient_user_id }}" />
+                <div class="flex-grow-1"><label for="settle_{{ direction }}_{{ obligation.user.id }}" class="form-label small mb-1">{{ 'Amount paid' if direction == 'outgoing' else 'Amount received' }}</label><input id="settle_{{ direction }}_{{ obligation.user.id }}" name="amount" type="number" class="form-control form-control-sm" min="0.01" max="{{ "%.2f"|format(obligation.amount) }}" value="{{ "%.2f"|format(obligation.amount) }}" step="0.01" required /></div>
+                <button class="btn btn-sm btn-success" type="submit">Settle</button>
+              </form>
+            </div>
             {% else %}
-              <p class="text-muted mb-0">You have no direct global payments to make.</p>
-            {% endif %}
+            <p class="text-muted mb-0">{{ 'You have no direct global payments to make.' if direction == 'outgoing' else 'No one currently owes you through a direct global obligation.' }}</p>
+            {% endfor %}
           </div>
-          <div class="col-md-6">
-            <h3 class="h6 text-success">Owed to you</h3>
-            {% if incoming_obligations %}
-              {% for obligation in incoming_obligations %}
-              <div class="border rounded p-3 mb-2">
-                <div class="d-flex justify-content-between gap-2"><strong>{{ obligation.user.name or obligation.user.login_id }}</strong><strong>₹{{ "%.2f"|format(obligation.amount) }}</strong></div>
-                {% if obligation.pending_amount %}<small class="text-muted">Pending incoming: ₹{{ "%.2f"|format(obligation.pending_amount) }}</small>{% else %}<small class="text-muted">No pending incoming settlement.</small>{% endif %}
-              </div>
-              {% endfor %}
-            {% else %}
-              <p class="text-muted mb-0">No one currently owes you through a direct global obligation.</p>
-            {% endif %}
-          </div>
+          {% endfor %}
         </div>
       </div>
     </section>
 
     <div class="card mt-4">
       <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-arrow-left-right me-1"></i>Settlement Requests</span>
-        <span class="badge bg-light text-dark">{{ settlement_requests | length }}</span>
+        <span><i class="bi bi-arrow-left-right me-1"></i>Settlement History</span>
+        <a href="{{ url_for('main.activity_history') }}" class="text-white small">View Activity</a>
       </div>
-      {% if settlement_requests %}
+      {% if settlement_entries %}
       <div class="list-group list-group-flush">
-        {% for settlement in settlement_requests %}
-        <div class="list-group-item">
-          <div class="d-flex flex-wrap justify-content-between gap-2 align-items-center">
-            <span><strong>{{ settlement.requester.name or settlement.requester.login_id }}</strong> paid <strong>{{ settlement.recipient.name or settlement.recipient.login_id }}</strong> <strong>₹{{ "%.2f"|format(settlement.amount) }}</strong></span>
-            <span class="badge {% if settlement.status == 'PENDING' %}bg-warning text-dark{% elif settlement.status == 'CONFIRMED' %}bg-success{% else %}bg-secondary{% endif %}">{{ settlement.status.title() }}</span>
-          </div>
-          {% if settlement.status == 'PENDING' and settlement.recipient_user_id == current_user.id %}
-          <div class="mt-2 d-flex gap-2">
-            <form method="POST" action="{{ url_for('main.confirm_settlement_request', request_id=settlement.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}" /><button class="btn btn-sm btn-success">Confirm payment</button></form>
-            <form method="POST" action="{{ url_for('main.reject_settlement_request', request_id=settlement.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}" /><button class="btn btn-sm btn-outline-secondary">Reject request</button></form>
-          </div>
-          {% elif settlement.status == 'PENDING' %}
-          <small class="text-muted">Awaiting confirmation from {{ settlement.recipient.name or settlement.recipient.login_id }}.</small>
-          {% else %}
-          <small class="text-muted">This request is read-only.</small>
-          {% endif %}
-        </div>
-        {% endfor %}
+        {% for entry in settlement_entries %}{{ settlement_entry(entry) }}{% endfor %}
       </div>
       {% else %}
-      <div class="card-body text-muted">No settlement requests yet. Requests will appear here when a payment is proposed.</div>
+      <div class="card-body text-muted">No settlements recorded yet.</div>
       {% endif %}
     </div>
 
@@ -206,7 +171,7 @@
   }));
   search.addEventListener('input', filterUsers);
   filterUsers();
-  document.querySelectorAll('.settlement-request-form').forEach(form => form.addEventListener('submit', () => {
+  document.querySelectorAll('.settlement-form').forEach(form => form.addEventListener('submit', () => {
     const button = form.querySelector('button[type="submit"], button:not([type])');
     if (button) { button.disabled = true; button.textContent = 'Submitting...'; }
   }));

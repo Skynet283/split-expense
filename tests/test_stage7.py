@@ -1,3 +1,4 @@
+from test_factory import settlement_form_data
 import unittest
 from decimal import Decimal
 
@@ -78,10 +79,10 @@ class Stage7Tests(unittest.TestCase):
         group_id, _, users = self.seed()
         self.client.post("/logout")
         self.login("1234567890")
-        self.client.post("/settlement-requests", data={"recipient_user_id": users["0123456789"], "amount": "500.00"})
+        self.client.post("/settlement-requests", data=settlement_form_data(self.client, {"recipient_user_id": users["0123456789"], "amount": "500.00"}))
         with self.app.app_context():
             request_id = SettlementRequest.query.one().id
-            self.assertEqual(SettlementRequest.query.one().status, "PENDING")
+            self.assertEqual(SettlementRequest.query.one().status, "CONFIRMED")
         self.client.post("/logout")
         self.login("0123456789")
         self.archive(group_id)

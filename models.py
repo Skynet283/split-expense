@@ -206,6 +206,7 @@ class ConfirmedSettlement(db.Model):
         db.UniqueConstraint("settlement_request_id", name="uq_confirmed_settlement_request"),
         db.CheckConstraint("payer_user_id != recipient_user_id", name="ck_confirmed_settlement_distinct_users"),
         db.CheckConstraint("amount > 0", name="ck_confirmed_settlement_positive_amount"),
+        db.Index("uq_confirmed_settlement_submission", "submission_id", unique=True),
     )
 
     id = db.Column(db.Integer, primary_key=True)
@@ -214,6 +215,23 @@ class ConfirmedSettlement(db.Model):
     recipient_user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
     amount = db.Column(db.Numeric(12, 2), nullable=False)
     confirmed_at = db.Column(db.DateTime, nullable=False)
+    recorded_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
+    submission_id = db.Column(db.String(36), nullable=True)
     settlement_request = db.relationship("SettlementRequest", foreign_keys=[settlement_request_id])
     payer = db.relationship("User", foreign_keys=[payer_user_id])
     recipient = db.relationship("User", foreign_keys=[recipient_user_id])
+    recorded_by_user = db.relationship("User", foreign_keys=[recorded_by_user_id])
+    reversal = db.relationship("SettlementReversal", back_populates="settlement", uselist=False)
+
+
+class SettlementReversal(db.Model):
+    """One append-only void marker; the original payment snapshot is retained."""
+
+    __tablename__ = "settlement_reversal"
+    id = db.Column(db.Integer, primary_key=True)
+    confirmed_settlement_id = db.Column(db.Integer, db.ForeignKey("confirmed_settlement.id", ondelete="RESTRICT"),
+                                        nullable=False, unique=True)
+    reversed_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    reversed_at = db.Column(db.DateTime, nullable=False)
+    settlement = db.relationship("ConfirmedSettlement", back_populates="reversal")
+    reversed_by_user = db.relationship("User", foreign_keys=[reversed_by_user_id])

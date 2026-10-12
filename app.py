@@ -46,6 +46,7 @@ def initialize_database(app):
             "member": {"user_id": "INTEGER"},
             "expense": {"paid_by_user_id": "INTEGER"},
             "expense_split": {"user_id": "INTEGER", "share_weight": "VARCHAR(100)"},
+            "confirmed_settlement": {"recorded_by_user_id": "INTEGER", "submission_id": "VARCHAR(36)"},
         }
         inspector = inspect(db.engine)
         for table_name, columns in additive_columns.items():
@@ -54,6 +55,14 @@ def initialize_database(app):
                 if column_name not in existing_columns:
                     db.session.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"))
                     db.session.commit()
+
+        # Nullable metadata leaves every legacy payment snapshot unchanged.
+        # create_all does not add indexes to existing tables, so upgrade it here.
+        db.session.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_confirmed_settlement_submission "
+            "ON confirmed_settlement (submission_id)"
+        ))
+        db.session.commit()
 
         # Seed the supplied initial account only once. It has no admin role
         # unless an operator explicitly assigns is_admin in the database.
